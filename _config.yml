@@ -9,7 +9,7 @@ description: '博客与记录'
 keywords:
 author: Shview
 language: zh-CN
-timezone: 'Asia/Beijing'
+timezone: 'Asia/Shanghai'
 
 # URL
 ## Set your site url here. For example, if you use GitHub Page, set url as 'https://username.github.io/project'
