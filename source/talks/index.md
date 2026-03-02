@@ -4,7 +4,7 @@ layout: page
 ---
 
 <div id="qexo_talks"></div>
-<script src="https://cdn.jsdelivr.net/npm/qexo-static/hexo/talks.js"></script>
+<script src="/js/qexo_talks.js"></script>
 
 <script>
   (function initQexo() {
