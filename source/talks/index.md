@@ -5,7 +5,7 @@ layout: page
 
 <div id="qexo_talks"></div>
 
-<script src="/js/qexo_talks.js"></script>
+<script src="/source/js/qexo_talks.js"></script>
 
 <script>
   (function init() {
