@@ -5,24 +5,30 @@ layout: page
 
 <div id="qexo_talks"></div>
 <script src="https://cdn.jsdelivr.net/npm/qexo-static@1.6.0/talks.js"></script>
+
 <script>
-  // 等待 window 加载，确保上面的 js 资源已就绪
-  window.addEventListener('load', function() {
+  (function initQexo() {
+    // 尝试不同的初始化函数名
     if (typeof renderTalks === 'function') {
       renderTalks({
         container: '#qexo_talks',
         url: 'https://qexo.shview.top',
         limit: 10
       });
-    } else {
-      // 如果还报错，尝试 QexoTalks (部分版本使用这个名称)
-      QexoTalks({
+      console.log("Qexo 说说已通过 renderTalks 加载");
+    } else if (typeof QexoTalks === 'function') {
+      new QexoTalks({
         container: '#qexo_talks',
         url: 'https://qexo.shview.top',
         limit: 10
       });
+      console.log("Qexo 说说已通过 QexoTalks 加载");
+    } else {
+      // 如果都没找到，等待 500ms 重试
+      console.log("脚本尚未就绪，准备重试...");
+      setTimeout(initQexo, 500);
     }
-  });
+  })();
 </script>
 
 <style>
