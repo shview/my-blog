@@ -3,19 +3,25 @@ abbrlink: 二叉搜索树BST代码与思路
 categories:
 - - 编程
 date: '2026-03-13T11:04:33.663321+08:00'
-excerpt: 注意：非动态大小 题目 P5076 【深基16.例7】普通二叉树（简化版） - 洛谷 #include &lt;iostream&gt;  using namespace std;  const int MAXN = 10005; const int INF = 2147483647;  struct Node {     int val;      // 节点存储的数值     int ls, ...
+excerpt: 二叉搜索树BST代码与思路
 tags:
 - 学习
 - C++
 - 编程
 title: 二叉搜索树BST代码
-updated: '2026-03-13T11:07:41.931+08:00'
+updated: '2026-03-13T11:17:34.060+08:00'
 ---
 注意：非动态大小
 
 题目
 
 [P5076 【深基16.例7】普通二叉树（简化版） - 洛谷](https://www.luogu.com.cn/problem/P5076)
+
+B站好视频
+
+https://www.bilibili.com/video/BV1eQ3RzxEoS
+
+注：仅定义等内容，几乎无代码实现
 
 ```
 #include <iostream>
