@@ -245,3 +245,6 @@ void dfs2(int u, int fa) {
 1.原先在v的人，他们可以减少一步，故1 * (-z[v]) = -sz[v].
 
 2.其他人，他们都需要多走一步，故1 * (total_weight - sz[v]) = total_weight - sz[v].
+
+
+其时间复杂度为$O(n)$，可处理$N$更多的情况。
