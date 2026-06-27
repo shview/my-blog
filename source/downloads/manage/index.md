@@ -32,7 +32,7 @@ description: 可视化编辑资料索引与上传公开文件
 
   <div class="manager-help">
     <strong>怎么用</strong>
-    <span>先等待自动读取索引；如果一直失败，点击“导入”选择 NKU-study-resources 仓库里的 manifest.json。左侧选择课程，右侧可以编辑课程说明、来源、贡献者、适用年级、分组说明和每个文件说明；拖拽文件到分组后，填写 GitHub token 再点“提交”。</span>
+    <span>先等待自动读取索引；如果一直失败，点击“导入”选择 NKU-study-resources 仓库里的 manifest.json。左侧可搜索课程，右侧可以编辑课程说明、来源、贡献者、适用年级、分组说明和每个文件说明；拖拽文件到分组后，填写 GitHub token 再点“提交”。没有站长 token 的协作者请看 <a href="https://github.com/shview/NKU-study-resources/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener noreferrer">协作说明</a>。</span>
   </div>
 
   <div class="manager-github">
@@ -48,6 +48,7 @@ description: 可视化编辑资料索引与上传公开文件
         <strong>课程</strong>
         <button id="course-add" type="button">新增</button>
       </div>
+      <input id="course-filter" class="course-filter" type="search" placeholder="搜索课程、学期、板块" autocomplete="off">
       <div id="course-list" class="course-list"></div>
     </aside>
 
@@ -68,6 +69,7 @@ description: 可视化编辑资料索引与上传公开文件
         </div>
         <label class="manager-wide">说明<textarea id="course-summary" rows="3"></textarea></label>
         <div class="manager-row-actions">
+          <button id="course-autofill" type="button">自动填写</button>
           <button id="course-save" type="button">保存课程</button>
           <button id="course-delete" type="button">删除课程</button>
         </div>
@@ -90,6 +92,7 @@ description: 可视化编辑资料索引与上传公开文件
   var status = document.getElementById("manager-status");
   var layout = document.querySelector(".manager-layout");
   var courseList = document.getElementById("course-list");
+  var courseFilter = document.getElementById("course-filter");
   var sectionList = document.getElementById("section-list");
   var manifest = null;
   var selectedCourseId = "";
@@ -212,11 +215,38 @@ description: 可视化编辑资料索引与上传公开文件
     return base.replace(/^\/+/, "").replace(/\/?$/, "/");
   }
 
+  function suggestedCourseId(course) {
+    return slug(course.title || [course.term, course.group].filter(Boolean).join("-"));
+  }
+
+  function suggestedBasePath(course) {
+    return normalizeBasePath({
+      term: course.term,
+      group: course.group,
+      title: course.title,
+      basePath: ""
+    });
+  }
+
+  function stripExtension(name) {
+    return String(name || "").replace(/\.[^.]+$/, "");
+  }
+
+  function textIncludes(value, query) {
+    return String(value || "").toLowerCase().indexOf(query) !== -1;
+  }
+
   function fileSize(bytes) {
     if (!bytes) return "0 B";
     if (bytes >= 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + " MB";
     if (bytes >= 1024) return Math.round(bytes / 1024) + " KB";
     return bytes + " B";
+  }
+
+  function courseFileCount(course) {
+    return (course.sections || []).reduce(function (sum, section) {
+      return sum + (section.files || []).length;
+    }, 0);
   }
 
   function loadManifest() {
@@ -234,12 +264,34 @@ description: 可视化编辑资料索引与上传公开文件
   }
 
   function renderCourses() {
-    courseList.innerHTML = manifest.courses.map(function (course) {
-      return '<button class="course-item' + (course.id === selectedCourseId ? " is-active" : "") + '" type="button" data-id="' + escapeHtml(course.id) + '">' +
-        '<strong>' + escapeHtml(course.title || "未命名课程") + '</strong>' +
-        '<small>' + escapeHtml([course.term, course.group].filter(Boolean).join(" / ")) + '</small>' +
-      '</button>';
-    }).join("");
+    var query = courseFilter.value.trim().toLowerCase();
+    var courses = (manifest.courses || []).filter(function (course) {
+      if (!query) return true;
+      return [course.title, course.term, course.group, course.id, course.summary, (course.tags || []).join(" ")]
+        .some(function (value) { return textIncludes(value, query); });
+    });
+    var terms = {};
+    courses.forEach(function (course) {
+      var term = course.term || "未分类学期";
+      var group = course.group || "未分类板块";
+      terms[term] = terms[term] || {};
+      terms[term][group] = terms[term][group] || [];
+      terms[term][group].push(course);
+    });
+    courseList.innerHTML = Object.keys(terms).map(function (term) {
+      return '<details class="course-term" open><summary>' + escapeHtml(term) + '</summary>' +
+        Object.keys(terms[term]).map(function (group) {
+          return '<details class="course-group" open><summary>' + escapeHtml(group) + '</summary>' +
+            terms[term][group].map(function (course) {
+              return '<button class="course-item' + (course.id === selectedCourseId ? " is-active" : "") + '" type="button" data-id="' + escapeHtml(course.id) + '">' +
+                '<strong>' + escapeHtml(course.title || "未命名课程") + '</strong>' +
+                '<small>' + courseFileCount(course) + ' 个文件</small>' +
+              '</button>';
+            }).join("") +
+          '</details>';
+        }).join("") +
+      '</details>';
+    }).join("") || '<div class="manager-empty">没有匹配课程。</div>';
   }
 
   function renderCourseEditor() {
@@ -257,6 +309,8 @@ description: 可视化编辑资料索引与上传公开文件
     fields.contributors.value = joinList(course.contributors);
     fields.tags.value = joinList(course.tags);
     fields.basePath.value = course.basePath || "";
+    fields.basePath.dataset.autoValue = suggestedBasePath(course);
+    fields.id.dataset.autoValue = suggestedCourseId(course);
     fields.summary.value = course.summary || "";
   }
 
@@ -298,7 +352,11 @@ description: 可视化编辑资料索引与上传公开文件
     var course = courseById(selectedCourseId);
     if (!course) return;
     var oldId = course.id;
-    course.id = fields.id.value.trim() || slug(fields.title.value);
+    course.id = fields.id.value.trim() || suggestedCourseId({
+      term: fields.term.value.trim(),
+      group: fields.group.value.trim(),
+      title: fields.title.value.trim()
+    });
     course.term = fields.term.value.trim();
     course.group = fields.group.value.trim();
     course.title = fields.title.value.trim();
@@ -308,13 +366,51 @@ description: 可视化编辑资料索引与上传公开文件
     course.grades = splitList(fields.grades.value);
     course.contributors = splitList(fields.contributors.value);
     course.tags = splitList(fields.tags.value);
-    course.basePath = fields.basePath.value.trim() || normalizeBasePath(course);
+    course.basePath = fields.basePath.value.trim() || suggestedBasePath(course);
     selectedCourseId = course.id;
     pendingUploads.forEach(function (upload) {
       if (upload.courseId === oldId) upload.courseId = course.id;
     });
     render();
     setStatus("课程已保存。");
+  }
+
+  function autoFillCourseFields() {
+    var draft = {
+      term: fields.term.value.trim() || "大一上",
+      group: fields.group.value.trim() || "通识必修课",
+      title: fields.title.value.trim() || "新课程"
+    };
+    if (!fields.term.value.trim()) fields.term.value = draft.term;
+    if (!fields.group.value.trim()) fields.group.value = draft.group;
+    if (!fields.title.value.trim()) fields.title.value = draft.title;
+    if (!fields.id.value.trim() || fields.id.value.indexOf("course-") === 0 || fields.id.value === fields.id.dataset.autoValue) {
+      fields.id.value = suggestedCourseId(draft);
+    }
+    if (!fields.basePath.value.trim() || fields.basePath.value === fields.basePath.dataset.autoValue) {
+      fields.basePath.value = suggestedBasePath(draft);
+    }
+    if (!fields.updated.value) fields.updated.value = today();
+    fields.id.dataset.autoValue = fields.id.value;
+    fields.basePath.dataset.autoValue = fields.basePath.value;
+    setStatus("已自动填写 ID、资源路径和更新时间。");
+  }
+
+  function autoFillFromTyping() {
+    var draft = {
+      term: fields.term.value.trim(),
+      group: fields.group.value.trim(),
+      title: fields.title.value.trim()
+    };
+    if (draft.title && (!fields.id.value.trim() || fields.id.value.indexOf("course-") === 0 || fields.id.value === fields.id.dataset.autoValue)) {
+      fields.id.value = suggestedCourseId(draft);
+      fields.id.dataset.autoValue = fields.id.value;
+    }
+    if ((draft.term || draft.group || draft.title) && (!fields.basePath.value.trim() || fields.basePath.value === fields.basePath.dataset.autoValue)) {
+      fields.basePath.value = suggestedBasePath(draft);
+      fields.basePath.dataset.autoValue = fields.basePath.value;
+    }
+    if (!fields.updated.value) fields.updated.value = today();
   }
 
   function saveSectionsFromDom() {
@@ -390,7 +486,7 @@ description: 可视化编辑资料索引与上传公开文件
         title: file.name,
         path: relativePath,
         size: file.size,
-        description: ""
+        description: stripExtension(file.name) + "。"
       });
       pendingUploads.push({
         courseId: course.id,
@@ -537,6 +633,8 @@ description: 可视化编辑资料索引与上传公开文件
     saveSectionsFromDom();
   });
 
+  courseFilter.addEventListener("input", renderCourses);
+
   sectionList.addEventListener("click", function (event) {
     var course = courseById(selectedCourseId);
     var sectionNode = event.target.closest(".section-editor");
@@ -599,6 +697,7 @@ description: 可视化编辑资料索引与上传公开文件
   document.getElementById("manager-commit").addEventListener("click", commitToGithub);
   document.getElementById("course-add").addEventListener("click", addCourse);
   document.getElementById("section-add").addEventListener("click", addSection);
+  document.getElementById("course-autofill").addEventListener("click", autoFillCourseFields);
   document.getElementById("course-save").addEventListener("click", saveCourseFromForm);
   document.getElementById("course-delete").addEventListener("click", function () {
     if (!manifest) {
@@ -610,13 +709,17 @@ description: 可视化编辑资料索引与上传公开文件
     render();
   });
 
+  [fields.term, fields.group, fields.title].forEach(function (field) {
+    field.addEventListener("input", autoFillFromTyping);
+  });
+
   loadManifest();
 })();
 </script>
 
 <style>
 .resource-manager {
-  max-width: 1120px;
+  max-width: 1320px;
   margin: 0 auto;
 }
 
@@ -715,17 +818,18 @@ description: 可视化编辑资料索引与上传公开文件
 .manager-github,
 .manager-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
   gap: 12px;
 }
 
 .manager-github {
+  grid-template-columns: repeat(4, minmax(180px, 1fr));
   margin-bottom: 18px;
 }
 
 .manager-layout {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 320px minmax(0, 1fr);
   gap: 18px;
   align-items: start;
 }
@@ -753,6 +857,37 @@ description: 可视化编辑资料索引与上传公开文件
   display: grid;
   gap: 8px;
   margin-top: 12px;
+}
+
+.course-filter {
+  margin-top: 12px;
+}
+
+.course-term,
+.course-group {
+  display: grid;
+  gap: 8px;
+}
+
+.course-term summary,
+.course-group summary {
+  cursor: pointer;
+  color: #60758a;
+  line-height: 1.6;
+}
+
+.course-term summary {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.course-group {
+  margin-left: 10px;
+}
+
+.course-group summary {
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .course-item {
@@ -793,16 +928,30 @@ description: 可视化编辑资料索引与上传公开文件
 .resource-manager input,
 .resource-manager textarea {
   width: 100%;
-  min-height: 38px;
-  padding: 8px 10px;
+  min-height: 46px;
+  padding: 10px 12px;
   border: 1px solid rgba(96, 117, 138, 0.26);
   border-radius: 8px;
   background: var(--board-bg-color, #fff);
   color: var(--text-color, #333);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.resource-manager textarea {
+  min-height: 96px;
+  resize: vertical;
 }
 
 .manager-wide {
   margin: 12px 0;
+}
+
+.manager-grid label:nth-child(5),
+.manager-grid label:nth-child(7),
+.manager-grid label:nth-child(9),
+.manager-grid label:nth-child(10) {
+  grid-column: span 2;
 }
 
 .section-editor {
@@ -811,11 +960,26 @@ description: 可视化编辑资料索引与上传公开文件
 }
 
 .section-editor-head {
-  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 110px auto auto auto;
+  align-items: center;
 }
 
 .section-title {
-  flex: 1;
+  min-width: 0;
+}
+
+.section-collapse {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.section-collapse input {
+  width: 18px;
+  min-height: 18px;
+  flex: 0 0 auto;
 }
 
 .section-note {
@@ -848,9 +1012,13 @@ description: 可视化编辑资料索引与上传公开文件
 
 .file-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(160px, 1fr) minmax(160px, 1fr) 72px auto auto auto;
-  gap: 8px;
+  grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.35fr) minmax(240px, 1.35fr) 72px 54px 54px 54px;
+  gap: 10px;
   align-items: center;
+}
+
+.file-row input {
+  min-width: 0;
 }
 
 .manager-empty {
@@ -865,6 +1033,13 @@ description: 可视化编辑资料索引与上传公开文件
     grid-template-columns: 1fr;
   }
 
+  .manager-grid label:nth-child(5),
+  .manager-grid label:nth-child(7),
+  .manager-grid label:nth-child(9),
+  .manager-grid label:nth-child(10) {
+    grid-column: auto;
+  }
+
   .manager-sidebar {
     position: static;
   }
@@ -874,8 +1049,7 @@ description: 可视化编辑资料索引与上传公开文件
   }
 
   .section-editor-head {
-    flex-wrap: wrap;
-    justify-content: flex-start;
+    grid-template-columns: 1fr;
   }
 }
 </style>
