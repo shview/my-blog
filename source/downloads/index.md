@@ -107,16 +107,6 @@ description: 课程资料、文件说明与公开下载
     loadFromUrls(catalogUrls(), 0)
       .then(function (manifest) {
         catalog = manifest.courses || [];
-        catalog.forEach(function (course) {
-          (course.sections || []).forEach(function (section) {
-            section.files = (section.files || []).sort(function (a, b) {
-              return String(a.title || a.path || "").localeCompare(String(b.title || b.path || ""), "zh-Hans-CN", {
-                numeric: true,
-                sensitivity: "base"
-              });
-            });
-          });
-        });
         resourceRoot = ["localhost", "127.0.0.1"].indexOf(location.hostname) !== -1
           ? "http://localhost:4020/resources/"
           : (manifest.resourceRoot || "");

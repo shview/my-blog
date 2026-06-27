@@ -52,6 +52,8 @@ description: 可视化编辑资料索引与上传公开文件
       <div id="course-list" class="course-list"></div>
     </aside>
 
+    <div class="manager-resizer" role="separator" aria-label="调整左右栏宽度"></div>
+
     <main class="manager-main">
       <section class="manager-panel">
         <h2>课程信息</h2>
@@ -91,12 +93,14 @@ description: 可视化编辑资料索引与上传公开文件
   var root = document.querySelector(".resource-manager");
   var status = document.getElementById("manager-status");
   var layout = document.querySelector(".manager-layout");
+  var resizer = document.querySelector(".manager-resizer");
   var courseList = document.getElementById("course-list");
   var courseFilter = document.getElementById("course-filter");
   var sectionList = document.getElementById("section-list");
   var manifest = null;
   var selectedCourseId = "";
   var pendingUploads = [];
+  var draggingFile = null;
 
   var fields = {
     id: document.getElementById("course-id"),
@@ -233,6 +237,20 @@ description: 可视化编辑资料索引与上传公开文件
     return String(name || "").replace(/\.[^.]+$/, "");
   }
 
+  function baseName(path) {
+    return String(path || "").split("/").pop();
+  }
+
+  function safePathPart(value) {
+    return String(value || "").trim().replace(/[\\/:*?"<>|]/g, "-").replace(/-+/g, "-");
+  }
+
+  function suggestedFilePath(section, file) {
+    var title = file.title || baseName(file.path) || "未命名文件";
+    var prefix = section.title ? safePathPart(section.title) + "/" : "";
+    return prefix + safePathPart(title);
+  }
+
   function fileSortKey(file) {
     return String(file.title || file.path || "").trim();
   }
@@ -355,13 +373,13 @@ description: 可视化编辑资料索引与上传公开文件
         '</div>' +
         '<textarea class="section-note" rows="2" placeholder="分组说明">' + escapeHtml(section.note || "") + '</textarea>' +
         '<div class="drop-zone" data-section="' + sectionIndex + '">拖拽文件到这里，或点击选择<input class="file-picker" type="file" multiple></div>' +
-        '<div class="file-list">' + (files.length ? '<div class="file-list-head"><span>文件名</span><span>仓库路径</span><span>文件说明</span><span>大小</span><span>操作</span></div>' : '') + files.map(function (file, fileIndex) {
-          return '<div class="file-row" data-file="' + fileIndex + '">' +
+        '<div class="file-list">' + (files.length ? '<div class="file-list-head"><span></span><span>文件名</span><span>文件说明</span><span>大小</span><span></span></div>' : '') + files.map(function (file, fileIndex) {
+          return '<div class="file-row" data-file="' + fileIndex + '" draggable="true">' +
+            '<span class="drag-handle" title="拖动排序" aria-label="拖动排序">::</span>' +
             '<label><span>文件名</span><input class="file-title" type="text" value="' + escapeHtml(file.title || "") + '" placeholder="文件名"></label>' +
-            '<label><span>仓库路径</span><input class="file-path" type="text" value="' + escapeHtml(file.path || "") + '" placeholder="相对课程目录的路径"></label>' +
             '<label><span>文件说明</span><input class="file-description" type="text" value="' + escapeHtml(file.description || "") + '" placeholder="显示在下载页的说明"></label>' +
             '<span class="file-size">' + fileSize(file.size) + '</span>' +
-            '<div class="file-actions"><button class="file-up" type="button">上移</button><button class="file-down" type="button">下移</button><button class="file-delete" type="button">删除</button></div>' +
+            '<button class="file-delete" type="button" title="删除" aria-label="删除">×</button>' +
           '</div>';
         }).join("") + '</div>' +
       '</article>';
@@ -444,9 +462,15 @@ description: 可视化编辑资料索引与上传公开文件
       section.collapsed = sectionNode.querySelector(".section-collapsed").checked;
       Array.prototype.forEach.call(sectionNode.querySelectorAll(".file-row"), function (fileNode) {
         var file = section.files[Number(fileNode.dataset.file)];
+        var oldPath = file.path;
         file.title = fileNode.querySelector(".file-title").value.trim();
-        file.path = fileNode.querySelector(".file-path").value.trim();
         file.description = fileNode.querySelector(".file-description").value.trim();
+        file.path = suggestedFilePath(section, file);
+        pendingUploads.forEach(function (upload) {
+          if (upload.courseId === course.id && upload.sectionIndex === sectionIndex && upload.path === oldPath) {
+            upload.path = file.path;
+          }
+        });
       });
     });
   }
@@ -493,6 +517,7 @@ description: 可视化编辑资料索引与上传公开文件
     var item = list.splice(from, 1)[0];
     list.splice(to, 0, item);
   }
+
 
   function addFiles(sectionIndex, files) {
     saveCourseFromForm();
@@ -671,10 +696,63 @@ description: 可视化编辑资料索引与上传公开文件
       var fileIndex = Number(fileNode.dataset.file);
       var files = course.sections[sectionIndex].files;
       if (event.target.closest(".file-delete")) files.splice(fileIndex, 1);
-      if (event.target.closest(".file-up")) moveItem(files, fileIndex, fileIndex - 1);
-      if (event.target.closest(".file-down")) moveItem(files, fileIndex, fileIndex + 1);
     }
     renderSections();
+  });
+
+  sectionList.addEventListener("dragstart", function (event) {
+    var handle = event.target.closest(".drag-handle");
+    var row = event.target.closest(".file-row");
+    var sectionNode = event.target.closest(".section-editor");
+    if (!handle || !row || !sectionNode) {
+      event.preventDefault();
+      return;
+    }
+    saveSectionsFromDom();
+    draggingFile = {
+      sectionIndex: Number(sectionNode.dataset.section),
+      fileIndex: Number(row.dataset.file)
+    };
+    row.classList.add("is-dragging");
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", "file-row");
+  });
+
+  sectionList.addEventListener("dragend", function (event) {
+    var row = event.target.closest(".file-row");
+    if (row) row.classList.remove("is-dragging");
+    draggingFile = null;
+  });
+
+  sectionList.addEventListener("dragover", function (event) {
+    if (event.target.closest(".file-row") && draggingFile) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      return;
+    }
+    if (event.target.closest(".drop-zone")) event.preventDefault();
+  });
+
+  sectionList.addEventListener("drop", function (event) {
+    var row = event.target.closest(".file-row");
+    if (row && draggingFile) {
+      event.preventDefault();
+      var course = courseById(selectedCourseId);
+      var sectionNode = row.closest(".section-editor");
+      var targetSectionIndex = Number(sectionNode.dataset.section);
+      var targetFileIndex = Number(row.dataset.file);
+      if (course && targetSectionIndex === draggingFile.sectionIndex && targetFileIndex !== draggingFile.fileIndex) {
+        saveSectionsFromDom();
+        moveItem(course.sections[targetSectionIndex].files, draggingFile.fileIndex, targetFileIndex);
+        renderSections();
+      }
+      draggingFile = null;
+      return;
+    }
+    var zone = event.target.closest(".drop-zone");
+    if (!zone) return;
+    event.preventDefault();
+    addFiles(Number(zone.dataset.section), event.dataTransfer.files);
   });
 
   sectionList.addEventListener("change", function (event) {
@@ -682,17 +760,6 @@ description: 可视化编辑资料索引与上传公开文件
     var sectionNode = event.target.closest(".section-editor");
     addFiles(Number(sectionNode.dataset.section), event.target.files);
     event.target.value = "";
-  });
-
-  sectionList.addEventListener("dragover", function (event) {
-    if (event.target.closest(".drop-zone")) event.preventDefault();
-  });
-
-  sectionList.addEventListener("drop", function (event) {
-    var zone = event.target.closest(".drop-zone");
-    if (!zone) return;
-    event.preventDefault();
-    addFiles(Number(zone.dataset.section), event.dataTransfer.files);
   });
 
   document.getElementById("manager-load").addEventListener("click", loadManifest);
@@ -732,6 +799,24 @@ description: 可视化编辑资料索引与上传公开文件
 
   [fields.term, fields.group, fields.title].forEach(function (field) {
     field.addEventListener("input", autoFillFromTyping);
+  });
+
+  resizer.addEventListener("mousedown", function (event) {
+    event.preventDefault();
+    var startX = event.clientX;
+    var startWidth = document.querySelector(".manager-sidebar").getBoundingClientRect().width;
+    document.body.classList.add("is-resizing-manager");
+    function onMove(moveEvent) {
+      var nextWidth = Math.max(220, Math.min(520, startWidth + moveEvent.clientX - startX));
+      layout.style.setProperty("--manager-sidebar-width", nextWidth + "px");
+    }
+    function onUp() {
+      document.body.classList.remove("is-resizing-manager");
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
   });
 
   loadManifest();
@@ -850,9 +935,27 @@ description: 可视化编辑资料索引与上传公开文件
 
 .manager-layout {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
-  gap: 18px;
+  grid-template-columns: var(--manager-sidebar-width, 320px) 8px minmax(0, 1fr);
+  gap: 12px;
   align-items: start;
+}
+
+.manager-resizer {
+  align-self: stretch;
+  min-height: 240px;
+  border-radius: 8px;
+  cursor: col-resize;
+  background: linear-gradient(to right, transparent 3px, rgba(96, 117, 138, 0.24) 3px, rgba(96, 117, 138, 0.24) 5px, transparent 5px);
+}
+
+.manager-resizer:hover,
+.is-resizing-manager .manager-resizer {
+  background: linear-gradient(to right, transparent 3px, rgba(63, 132, 119, 0.58) 3px, rgba(63, 132, 119, 0.58) 5px, transparent 5px);
+}
+
+.is-resizing-manager {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .manager-sidebar,
@@ -1036,7 +1139,7 @@ description: 可视化编辑资料索引与上传公开文件
 
 .file-list-head {
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.35fr) minmax(0, 1.35fr) 72px 172px;
+  grid-template-columns: 28px minmax(150px, 1fr) minmax(160px, 1.25fr) 72px 40px;
   gap: 10px;
   padding: 0 2px;
   color: #60758a;
@@ -1046,10 +1149,32 @@ description: 可视化编辑资料索引与上传公开文件
 
 .file-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.35fr) minmax(0, 1.35fr) 72px 172px;
+  grid-template-columns: 28px minmax(150px, 1fr) minmax(160px, 1.25fr) 72px 40px;
   gap: 10px;
   align-items: center;
   min-width: 0;
+}
+
+.drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 42px;
+  border-radius: 8px;
+  color: #60758a;
+  cursor: grab;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.drag-handle:hover {
+  background: rgba(96, 117, 138, 0.1);
+  color: #2f6d62;
+}
+
+.file-row.is-dragging {
+  opacity: 0.55;
 }
 
 .file-row label {
@@ -1067,10 +1192,6 @@ description: 可视化编辑资料索引与上传公开文件
 
 .file-row input,
 .file-row .file-size,
-.file-actions {
-  min-width: 0;
-}
-
 .file-row input {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1081,15 +1202,12 @@ description: 可视化编辑资料索引与上传公开文件
   white-space: nowrap;
 }
 
-.file-actions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
-}
-
-.file-actions button {
-  min-width: 0;
-  padding: 0 8px;
+.file-delete {
+  width: 40px;
+  min-width: 40px;
+  padding: 0;
+  font-size: 22px;
+  line-height: 1;
 }
 
 .manager-empty {
@@ -1104,6 +1222,10 @@ description: 可视化编辑资料索引与上传公开文件
     grid-template-columns: 1fr;
   }
 
+  .manager-resizer {
+    display: none;
+  }
+
   .manager-grid label:nth-child(5),
   .manager-grid label:nth-child(7),
   .manager-grid label:nth-child(9),
@@ -1116,7 +1238,7 @@ description: 可视化编辑资料索引与上传公开文件
   }
 
   .file-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: 28px minmax(0, 1fr) 40px;
   }
 
   .file-list-head {
@@ -1132,8 +1254,9 @@ description: 可视化编辑资料索引与上传公开文件
     white-space: normal;
   }
 
-  .file-actions {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .file-row label:nth-of-type(2),
+  .file-size {
+    grid-column: 2 / 4;
   }
 
   .section-editor-head {
