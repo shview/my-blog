@@ -7,6 +7,8 @@ description: 可视化编辑资料索引与上传公开文件
 
 <div class="resource-manager"
      data-catalog-url="https://raw.githubusercontent.com/shview/NKU-study-resources/main/manifest.json"
+     data-catalog-fallback-url="https://cdn.jsdelivr.net/gh/shview/NKU-study-resources@main/manifest.json"
+     data-catalog-backup-url="https://fastly.jsdelivr.net/gh/shview/NKU-study-resources@main/manifest.json"
      data-local-catalog-url="http://localhost:4020/manifest.json"
      data-default-owner="shview"
      data-default-repo="NKU-study-resources"
@@ -18,12 +20,18 @@ description: 可视化编辑资料索引与上传公开文件
     </div>
     <div class="manager-actions">
       <button id="manager-load" type="button">刷新</button>
+      <label class="manager-import">导入<input id="manager-import" type="file" accept="application/json,.json"></label>
       <button id="manager-export" type="button">导出</button>
       <button id="manager-commit" type="button">提交</button>
     </div>
   </div>
 
   <div id="manager-status" class="manager-status">正在加载资料索引...</div>
+
+  <div class="manager-help">
+    <strong>怎么用</strong>
+    <span>先等待自动读取索引；如果一直失败，点击“导入”选择 NKU-study-resources 仓库里的 manifest.json。左侧选择课程，右侧可以编辑课程说明、来源、贡献者、适用年级、分组说明和每个文件说明；拖拽文件到分组后，填写 GitHub token 再点“提交”。</span>
+  </div>
 
   <div class="manager-github">
     <label>Owner<input id="github-owner" type="text"></label>
@@ -116,9 +124,49 @@ description: 可视化编辑资料索引与上传公开文件
     status.hidden = !message;
   }
 
-  function catalogUrl() {
+  function catalogUrls() {
     var isLocal = ["localhost", "127.0.0.1"].indexOf(location.hostname) !== -1;
-    return isLocal ? root.dataset.localCatalogUrl : root.dataset.catalogUrl;
+    var urls = [];
+    if (isLocal && root.dataset.localCatalogUrl) urls.push(root.dataset.localCatalogUrl);
+    [root.dataset.catalogUrl, root.dataset.catalogFallbackUrl, root.dataset.catalogBackupUrl].forEach(function (url) {
+      if (url && urls.indexOf(url) === -1) urls.push(url);
+    });
+    return urls;
+  }
+
+  function fetchJson(url, timeout) {
+    var controller = window.AbortController ? new AbortController() : null;
+    var timer = controller ? setTimeout(function () { controller.abort(); }, timeout || 8000) : null;
+    return fetch(url, { cache: "no-cache", signal: controller ? controller.signal : undefined })
+      .then(function (response) {
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        return response.json();
+      })
+      .finally(function () {
+        if (timer) clearTimeout(timer);
+      });
+  }
+
+  function loadFromUrls(urls, index, errors) {
+    errors = errors || [];
+    if (index >= urls.length) {
+      throw new Error(errors.join("；") || "没有可用索引地址");
+    }
+    var url = urls[index];
+    setStatus("正在加载资料索引... " + url);
+    return fetchJson(url, 8000).catch(function (error) {
+      errors.push(url + "：" + (error.name === "AbortError" ? "超时" : error.message));
+      return loadFromUrls(urls, index + 1, errors);
+    });
+  }
+
+  function applyManifest(data) {
+    manifest = data;
+    manifest.courses = manifest.courses || [];
+    selectedCourseId = manifest.courses[0] ? manifest.courses[0].id : "";
+    layout.hidden = false;
+    setStatus("");
+    render();
   }
 
   function splitList(value) {
@@ -164,22 +212,10 @@ description: 可视化编辑资料索引与上传公开文件
   }
 
   function loadManifest() {
-    setStatus("正在加载资料索引...");
-    fetch(catalogUrl(), { cache: "no-cache" })
-      .then(function (response) {
-        if (!response.ok) throw new Error("HTTP " + response.status);
-        return response.json();
-      })
-      .then(function (data) {
-        manifest = data;
-        manifest.courses = manifest.courses || [];
-        selectedCourseId = manifest.courses[0] ? manifest.courses[0].id : "";
-        layout.hidden = false;
-        setStatus("");
-        render();
-      })
+    loadFromUrls(catalogUrls(), 0)
+      .then(applyManifest)
       .catch(function (error) {
-        setStatus("加载失败：" + error.message, true);
+        setStatus("加载失败：" + error.message + "。可以点“导入”手动选择 manifest.json 继续编辑。", true);
       });
   }
 
@@ -292,6 +328,10 @@ description: 可视化编辑资料索引与上传公开文件
   }
 
   function addCourse() {
+    if (!manifest) {
+      setStatus("还没有资料索引，请先刷新或导入 manifest.json。", true);
+      return;
+    }
     var id = "course-" + Date.now();
     manifest.courses.push({
       id: id,
@@ -312,6 +352,10 @@ description: 可视化编辑资料索引与上传公开文件
   }
 
   function addSection() {
+    if (!manifest) {
+      setStatus("还没有资料索引，请先刷新或导入 manifest.json。", true);
+      return;
+    }
     saveCourseFromForm();
     var course = courseById(selectedCourseId);
     if (!course) return;
@@ -352,6 +396,10 @@ description: 可视化编辑资料索引与上传公开文件
   }
 
   function exportManifest() {
+    if (!manifest) {
+      setStatus("还没有资料索引，请先刷新或导入 manifest.json。", true);
+      return;
+    }
     saveCourseFromForm();
     saveSectionsFromDom();
     manifest.updated = today();
@@ -426,6 +474,10 @@ description: 可视化编辑资料索引与上传公开文件
   }
 
   function commitToGithub() {
+    if (!manifest) {
+      setStatus("还没有资料索引，请先刷新或导入 manifest.json。", true);
+      return;
+    }
     saveCourseFromForm();
     saveSectionsFromDom();
     manifest.updated = today();
@@ -517,12 +569,34 @@ description: 可视化编辑资料索引与上传公开文件
   });
 
   document.getElementById("manager-load").addEventListener("click", loadManifest);
+  document.getElementById("manager-import").addEventListener("change", function (event) {
+    var file = event.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        applyManifest(JSON.parse(reader.result));
+        setStatus("已导入 " + file.name + "。");
+      } catch (error) {
+        setStatus("导入失败：" + error.message, true);
+      }
+    };
+    reader.onerror = function () {
+      setStatus("导入失败：无法读取文件。", true);
+    };
+    reader.readAsText(file, "utf-8");
+    event.target.value = "";
+  });
   document.getElementById("manager-export").addEventListener("click", exportManifest);
   document.getElementById("manager-commit").addEventListener("click", commitToGithub);
   document.getElementById("course-add").addEventListener("click", addCourse);
   document.getElementById("section-add").addEventListener("click", addSection);
   document.getElementById("course-save").addEventListener("click", saveCourseFromForm);
   document.getElementById("course-delete").addEventListener("click", function () {
+    if (!manifest) {
+      setStatus("还没有资料索引，请先刷新或导入 manifest.json。", true);
+      return;
+    }
     manifest.courses = manifest.courses.filter(function (course) { return course.id !== selectedCourseId; });
     selectedCourseId = manifest.courses[0] ? manifest.courses[0].id : "";
     render();
@@ -568,7 +642,8 @@ description: 可视化编辑资料索引与上传公开文件
   justify-content: flex-start;
 }
 
-.resource-manager button {
+.resource-manager button,
+.manager-import {
   min-height: 36px;
   border: 1px solid rgba(63, 132, 119, 0.34);
   border-radius: 8px;
@@ -577,8 +652,25 @@ description: 可视化编辑资料索引与上传公开文件
   cursor: pointer;
 }
 
-.resource-manager button:hover {
+.resource-manager button:hover,
+.manager-import:hover {
   background: rgba(63, 132, 119, 0.14);
+}
+
+.manager-import {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  font-size: 14px;
+}
+
+.manager-import input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .manager-status {
@@ -594,6 +686,22 @@ description: 可视化编辑资料索引与上传公开文件
   border-color: rgba(194, 81, 81, 0.34);
   color: #a33d3d;
   background: rgba(194, 81, 81, 0.08);
+}
+
+.manager-help {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid rgba(63, 132, 119, 0.18);
+  border-radius: 8px;
+  color: #60758a;
+  background: rgba(63, 132, 119, 0.06);
+  line-height: 1.7;
+}
+
+.manager-help strong {
+  color: #2f6d62;
 }
 
 .manager-github,
@@ -665,6 +773,13 @@ description: 可视化编辑资料索引与上传公开文件
   gap: 6px;
   color: #60758a;
   font-size: 13px;
+}
+
+.resource-manager .manager-import {
+  display: inline-flex;
+  gap: 0;
+  color: #2f6d62;
+  font-size: 14px;
 }
 
 .resource-manager input,

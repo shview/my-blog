@@ -8,6 +8,8 @@ description: 课程资料、文件说明与公开下载
 <div class="resource-page"
      data-openlist-url="https://pan.shview.top/"
      data-catalog-url="https://raw.githubusercontent.com/shview/NKU-study-resources/main/manifest.json"
+     data-catalog-fallback-url="https://cdn.jsdelivr.net/gh/shview/NKU-study-resources@main/manifest.json"
+     data-catalog-backup-url="https://fastly.jsdelivr.net/gh/shview/NKU-study-resources@main/manifest.json"
      data-local-catalog-url="http://localhost:4020/manifest.json">
   <div class="resource-toolbar">
     <div>
@@ -58,18 +60,44 @@ description: 课程资料、文件说明与公开下载
     status.hidden = !message;
   }
 
-  function catalogUrl() {
+  function catalogUrls() {
     var isLocal = ["localhost", "127.0.0.1"].indexOf(location.hostname) !== -1;
-    return isLocal ? pageRoot.dataset.localCatalogUrl : pageRoot.dataset.catalogUrl;
+    var urls = [];
+    if (isLocal && pageRoot.dataset.localCatalogUrl) urls.push(pageRoot.dataset.localCatalogUrl);
+    [pageRoot.dataset.catalogUrl, pageRoot.dataset.catalogFallbackUrl, pageRoot.dataset.catalogBackupUrl].forEach(function (url) {
+      if (url && urls.indexOf(url) === -1) urls.push(url);
+    });
+    return urls;
   }
 
-  function loadCatalog() {
-    setStatus("正在加载资料索引...");
-    fetch(catalogUrl(), { mode: "cors", cache: "no-cache" })
+  function fetchJson(url, timeout) {
+    var controller = window.AbortController ? new AbortController() : null;
+    var timer = controller ? setTimeout(function () { controller.abort(); }, timeout || 8000) : null;
+    return fetch(url, { mode: "cors", cache: "no-cache", signal: controller ? controller.signal : undefined })
       .then(function (response) {
         if (!response.ok) throw new Error("HTTP " + response.status);
         return response.json();
       })
+      .finally(function () {
+        if (timer) clearTimeout(timer);
+      });
+  }
+
+  function loadFromUrls(urls, index, errors) {
+    errors = errors || [];
+    if (index >= urls.length) {
+      throw new Error(errors.join("；") || "没有可用索引地址");
+    }
+    var url = urls[index];
+    return fetchJson(url, 8000).catch(function (error) {
+      errors.push(url + "：" + (error.name === "AbortError" ? "超时" : error.message));
+      return loadFromUrls(urls, index + 1, errors);
+    });
+  }
+
+  function loadCatalog() {
+    setStatus("正在加载资料索引...");
+    loadFromUrls(catalogUrls(), 0)
       .then(function (manifest) {
         catalog = manifest.courses || [];
         resourceRoot = ["localhost", "127.0.0.1"].indexOf(location.hostname) !== -1
