@@ -365,19 +365,16 @@ description: 可视化编辑资料索引与上传公开文件
       var files = section.files || [];
       return '<article class="section-editor" data-section="' + sectionIndex + '">' +
         '<div class="section-editor-head">' +
-          '<input class="section-title" type="text" value="' + escapeHtml(section.title || "") + '" placeholder="分组标题">' +
+          '<input class="section-title" type="text" value="' + escapeHtml(section.title || "") + '" title="' + escapeHtml(section.title || "") + '" placeholder="分组标题">' +
           '<label class="section-collapse"><input class="section-collapsed" type="checkbox"' + (section.collapsed ? " checked" : "") + '> 默认收起</label>' +
-          '<button class="section-up" type="button">上移</button>' +
-          '<button class="section-down" type="button">下移</button>' +
-          '<button class="section-delete" type="button">删除</button>' +
+          '<button class="section-delete" type="button" title="删除分组" aria-label="删除分组">×</button>' +
         '</div>' +
-        '<textarea class="section-note" rows="2" placeholder="分组说明">' + escapeHtml(section.note || "") + '</textarea>' +
+        '<textarea class="section-note" rows="2" title="' + escapeHtml(section.note || "") + '" placeholder="分组说明">' + escapeHtml(section.note || "") + '</textarea>' +
         '<div class="drop-zone" data-section="' + sectionIndex + '">拖拽文件到这里，或点击选择<input class="file-picker" type="file" multiple></div>' +
-        '<div class="file-list">' + (files.length ? '<div class="file-list-head"><span></span><span>文件名</span><span>文件说明</span><span>大小</span><span></span></div>' : '') + files.map(function (file, fileIndex) {
-          return '<div class="file-row" data-file="' + fileIndex + '" draggable="true">' +
-            '<span class="drag-handle" title="拖动排序" aria-label="拖动排序">::</span>' +
-            '<label><span>文件名</span><input class="file-title" type="text" value="' + escapeHtml(file.title || "") + '" placeholder="文件名"></label>' +
-            '<label><span>文件说明</span><input class="file-description" type="text" value="' + escapeHtml(file.description || "") + '" placeholder="显示在下载页的说明"></label>' +
+        '<div class="file-list">' + (files.length ? '<div class="file-list-head"><span></span><span>文件名</span><span>大小</span><span></span></div>' : '') + files.map(function (file, fileIndex) {
+          return '<div class="file-row" data-file="' + fileIndex + '">' +
+            '<span class="drag-handle" draggable="true" title="拖动排序" aria-label="拖动排序">::</span>' +
+            '<label><span>文件名</span><input class="file-title" type="text" value="' + escapeHtml(file.title || "") + '" title="' + escapeHtml(file.title || "") + '" placeholder="文件名"></label>' +
             '<span class="file-size">' + fileSize(file.size) + '</span>' +
             '<button class="file-delete" type="button" title="删除" aria-label="删除">×</button>' +
           '</div>';
@@ -464,8 +461,8 @@ description: 可视化编辑资料索引与上传公开文件
         var file = section.files[Number(fileNode.dataset.file)];
         var oldPath = file.path;
         file.title = fileNode.querySelector(".file-title").value.trim();
-        file.description = fileNode.querySelector(".file-description").value.trim();
         file.path = suggestedFilePath(section, file);
+        if (!file.description) file.description = stripExtension(file.title) + "。";
         pendingUploads.forEach(function (upload) {
           if (upload.courseId === course.id && upload.sectionIndex === sectionIndex && upload.path === oldPath) {
             upload.path = file.path;
@@ -675,7 +672,10 @@ description: 可视化编辑资料索引与上传公开文件
     render();
   });
 
-  sectionList.addEventListener("input", function () {
+  sectionList.addEventListener("input", function (event) {
+    if (event.target.matches(".section-title, .section-note, .file-title")) {
+      event.target.title = event.target.value;
+    }
     saveSectionsFromDom();
   });
 
@@ -690,8 +690,6 @@ description: 可视化编辑资料索引与上传公开文件
 
     saveSectionsFromDom();
     if (event.target.closest(".section-delete")) course.sections.splice(sectionIndex, 1);
-    if (event.target.closest(".section-up")) moveItem(course.sections, sectionIndex, sectionIndex - 1);
-    if (event.target.closest(".section-down")) moveItem(course.sections, sectionIndex, sectionIndex + 1);
     if (fileNode) {
       var fileIndex = Number(fileNode.dataset.file);
       var files = course.sections[sectionIndex].files;
@@ -1087,7 +1085,7 @@ description: 可视化编辑资料索引与上传公开文件
 
 .section-editor-head {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) 110px auto auto auto;
+  grid-template-columns: minmax(0, 1fr) 112px 40px;
   align-items: center;
 }
 
@@ -1139,7 +1137,7 @@ description: 可视化编辑资料索引与上传公开文件
 
 .file-list-head {
   display: grid;
-  grid-template-columns: 28px minmax(150px, 1fr) minmax(160px, 1.25fr) 72px 40px;
+  grid-template-columns: 28px minmax(0, 1fr) 72px 40px;
   gap: 10px;
   padding: 0 2px;
   color: #60758a;
@@ -1149,10 +1147,11 @@ description: 可视化编辑资料索引与上传公开文件
 
 .file-row {
   display: grid;
-  grid-template-columns: 28px minmax(150px, 1fr) minmax(160px, 1.25fr) 72px 40px;
+  grid-template-columns: 28px minmax(0, 1fr) 72px 40px;
   gap: 10px;
   align-items: center;
   min-width: 0;
+  overflow: visible;
 }
 
 .drag-handle {
@@ -1166,6 +1165,7 @@ description: 可视化编辑资料索引与上传公开文件
   cursor: grab;
   font-weight: 700;
   letter-spacing: 0;
+  user-select: none;
 }
 
 .drag-handle:hover {
@@ -1195,6 +1195,7 @@ description: 可视化编辑资料索引与上传公开文件
 .file-row input {
   overflow: hidden;
   text-overflow: ellipsis;
+  user-select: text;
 }
 
 .file-size {
@@ -1203,6 +1204,14 @@ description: 可视化编辑资料索引与上传公开文件
 }
 
 .file-delete {
+  width: 40px;
+  min-width: 40px;
+  padding: 0;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.section-delete {
   width: 40px;
   min-width: 40px;
   padding: 0;
@@ -1238,7 +1247,7 @@ description: 可视化编辑资料索引与上传公开文件
   }
 
   .file-row {
-    grid-template-columns: 28px minmax(0, 1fr) 40px;
+    grid-template-columns: 28px minmax(0, 1fr) 64px 40px;
   }
 
   .file-list-head {
@@ -1254,13 +1263,8 @@ description: 可视化编辑资料索引与上传公开文件
     white-space: normal;
   }
 
-  .file-row label:nth-of-type(2),
-  .file-size {
-    grid-column: 2 / 4;
-  }
-
   .section-editor-head {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) 112px 40px;
   }
 }
 </style>
