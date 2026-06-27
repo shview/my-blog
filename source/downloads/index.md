@@ -14,9 +14,10 @@ description: 课程资料、文件说明与公开下载
       <p class="resource-kicker">Resources</p>
       <h1>资料</h1>
     </div>
-    <a class="resource-pan-button" href="https://pan.shview.top/" target="_blank" rel="noopener noreferrer" title="打开 OpenList">
-      OpenList
-    </a>
+    <div class="resource-actions">
+      <a class="resource-action-button" href="/downloads/manage/" target="_self" title="管理资料">管理</a>
+      <a class="resource-action-button" href="https://pan.shview.top/" target="_blank" rel="noopener noreferrer" title="打开 OpenList">OpenList</a>
+    </div>
   </div>
 
   <div class="resource-search">
@@ -321,7 +322,14 @@ description: 课程资料、文件说明与公开下载
   line-height: 1.2;
 }
 
-.resource-pan-button {
+.resource-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.resource-action-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -335,7 +343,7 @@ description: 课程资料、文件说明与公开下载
   text-decoration: none;
 }
 
-.resource-pan-button:hover {
+.resource-action-button:hover {
   color: #24584f;
   text-decoration: none;
   background: rgba(63, 132, 119, 0.14);
