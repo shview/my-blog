@@ -5,6 +5,7 @@ layout: page
 description: 可视化编辑资料索引与上传公开文件
 ---
 
+{% raw %}
 <div class="resource-manager"
      data-catalog-url="https://raw.githubusercontent.com/shview/NKU-study-resources/main/manifest.json"
      data-catalog-api-url="https://api.github.com/repos/shview/NKU-study-resources/contents/manifest.json?ref=main"
@@ -878,3 +879,4 @@ description: 可视化编辑资料索引与上传公开文件
   }
 }
 </style>
+{% endraw %}
