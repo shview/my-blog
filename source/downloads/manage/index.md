@@ -7,6 +7,7 @@ description: 可视化编辑资料索引与上传公开文件
 
 <div class="resource-manager"
      data-catalog-url="https://raw.githubusercontent.com/shview/NKU-study-resources/main/manifest.json"
+     data-catalog-api-url="https://api.github.com/repos/shview/NKU-study-resources/contents/manifest.json?ref=main"
      data-catalog-fallback-url="https://cdn.jsdelivr.net/gh/shview/NKU-study-resources@main/manifest.json"
      data-catalog-backup-url="https://fastly.jsdelivr.net/gh/shview/NKU-study-resources@main/manifest.json"
      data-local-catalog-url="http://localhost:4020/manifest.json"
@@ -128,7 +129,7 @@ description: 可视化编辑资料索引与上传公开文件
     var isLocal = ["localhost", "127.0.0.1"].indexOf(location.hostname) !== -1;
     var urls = [];
     if (isLocal && root.dataset.localCatalogUrl) urls.push(root.dataset.localCatalogUrl);
-    [root.dataset.catalogUrl, root.dataset.catalogFallbackUrl, root.dataset.catalogBackupUrl].forEach(function (url) {
+    [root.dataset.catalogUrl, root.dataset.catalogApiUrl, root.dataset.catalogFallbackUrl, root.dataset.catalogBackupUrl].forEach(function (url) {
       if (url && urls.indexOf(url) === -1) urls.push(url);
     });
     return urls;
@@ -141,6 +142,12 @@ description: 可视化编辑资料索引与上传公开文件
       .then(function (response) {
         if (!response.ok) throw new Error("HTTP " + response.status);
         return response.json();
+      })
+      .then(function (body) {
+        if (body && body.encoding === "base64" && body.content) {
+          return JSON.parse(decodeURIComponent(escape(atob(String(body.content).replace(/\s/g, "")))));
+        }
+        return body;
       })
       .finally(function () {
         if (timer) clearTimeout(timer);

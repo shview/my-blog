@@ -8,6 +8,7 @@ description: 课程资料、文件说明与公开下载
 <div class="resource-page"
      data-openlist-url="https://pan.shview.top/"
      data-catalog-url="https://raw.githubusercontent.com/shview/NKU-study-resources/main/manifest.json"
+     data-catalog-api-url="https://api.github.com/repos/shview/NKU-study-resources/contents/manifest.json?ref=main"
      data-catalog-fallback-url="https://cdn.jsdelivr.net/gh/shview/NKU-study-resources@main/manifest.json"
      data-catalog-backup-url="https://fastly.jsdelivr.net/gh/shview/NKU-study-resources@main/manifest.json"
      data-local-catalog-url="http://localhost:4020/manifest.json">
@@ -64,7 +65,7 @@ description: 课程资料、文件说明与公开下载
     var isLocal = ["localhost", "127.0.0.1"].indexOf(location.hostname) !== -1;
     var urls = [];
     if (isLocal && pageRoot.dataset.localCatalogUrl) urls.push(pageRoot.dataset.localCatalogUrl);
-    [pageRoot.dataset.catalogUrl, pageRoot.dataset.catalogFallbackUrl, pageRoot.dataset.catalogBackupUrl].forEach(function (url) {
+    [pageRoot.dataset.catalogUrl, pageRoot.dataset.catalogApiUrl, pageRoot.dataset.catalogFallbackUrl, pageRoot.dataset.catalogBackupUrl].forEach(function (url) {
       if (url && urls.indexOf(url) === -1) urls.push(url);
     });
     return urls;
@@ -77,6 +78,12 @@ description: 课程资料、文件说明与公开下载
       .then(function (response) {
         if (!response.ok) throw new Error("HTTP " + response.status);
         return response.json();
+      })
+      .then(function (body) {
+        if (body && body.encoding === "base64" && body.content) {
+          return JSON.parse(decodeURIComponent(escape(atob(String(body.content).replace(/\s/g, "")))));
+        }
+        return body;
       })
       .finally(function () {
         if (timer) clearTimeout(timer);
