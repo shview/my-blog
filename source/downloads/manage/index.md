@@ -687,13 +687,17 @@ description: 可视化编辑资料索引与上传公开文件
     if (!course || !sectionNode) return;
     var sectionIndex = Number(sectionNode.dataset.section);
     var fileNode = event.target.closest(".file-row");
+    var deleteSection = event.target.closest(".section-delete");
+    var deleteFile = event.target.closest(".file-delete");
+
+    if (!deleteSection && !deleteFile) return;
 
     saveSectionsFromDom();
-    if (event.target.closest(".section-delete")) course.sections.splice(sectionIndex, 1);
-    if (fileNode) {
+    if (deleteSection) course.sections.splice(sectionIndex, 1);
+    if (deleteFile && fileNode) {
       var fileIndex = Number(fileNode.dataset.file);
       var files = course.sections[sectionIndex].files;
-      if (event.target.closest(".file-delete")) files.splice(fileIndex, 1);
+      files.splice(fileIndex, 1);
     }
     renderSections();
   });
