@@ -174,6 +174,7 @@ description: 可视化编辑资料索引与上传公开文件
   function applyManifest(data) {
     manifest = data;
     manifest.courses = manifest.courses || [];
+    sortManifestFiles();
     selectedCourseId = manifest.courses[0] ? manifest.courses[0].id : "";
     layout.hidden = false;
     setStatus("");
@@ -230,6 +231,27 @@ description: 可视化编辑资料索引与上传公开文件
 
   function stripExtension(name) {
     return String(name || "").replace(/\.[^.]+$/, "");
+  }
+
+  function fileSortKey(file) {
+    return String(file.title || file.path || "").trim();
+  }
+
+  function sortFiles(files) {
+    return (files || []).sort(function (a, b) {
+      return fileSortKey(a).localeCompare(fileSortKey(b), "zh-Hans-CN", {
+        numeric: true,
+        sensitivity: "base"
+      });
+    });
+  }
+
+  function sortManifestFiles() {
+    (manifest.courses || []).forEach(function (course) {
+      (course.sections || []).forEach(function (section) {
+        section.files = sortFiles(section.files || []);
+      });
+    });
   }
 
   function textIncludes(value, query) {
@@ -333,15 +355,13 @@ description: 可视化编辑资料索引与上传公开文件
         '</div>' +
         '<textarea class="section-note" rows="2" placeholder="分组说明">' + escapeHtml(section.note || "") + '</textarea>' +
         '<div class="drop-zone" data-section="' + sectionIndex + '">拖拽文件到这里，或点击选择<input class="file-picker" type="file" multiple></div>' +
-        '<div class="file-list">' + files.map(function (file, fileIndex) {
+        '<div class="file-list">' + (files.length ? '<div class="file-list-head"><span>文件名</span><span>仓库路径</span><span>文件说明</span><span>大小</span><span>操作</span></div>' : '') + files.map(function (file, fileIndex) {
           return '<div class="file-row" data-file="' + fileIndex + '">' +
-            '<input class="file-title" type="text" value="' + escapeHtml(file.title || "") + '" placeholder="文件名">' +
-            '<input class="file-path" type="text" value="' + escapeHtml(file.path || "") + '" placeholder="路径">' +
-            '<input class="file-description" type="text" value="' + escapeHtml(file.description || "") + '" placeholder="说明">' +
-            '<span>' + fileSize(file.size) + '</span>' +
-            '<button class="file-up" type="button">上移</button>' +
-            '<button class="file-down" type="button">下移</button>' +
-            '<button class="file-delete" type="button">删除</button>' +
+            '<label><span>文件名</span><input class="file-title" type="text" value="' + escapeHtml(file.title || "") + '" placeholder="文件名"></label>' +
+            '<label><span>仓库路径</span><input class="file-path" type="text" value="' + escapeHtml(file.path || "") + '" placeholder="相对课程目录的路径"></label>' +
+            '<label><span>文件说明</span><input class="file-description" type="text" value="' + escapeHtml(file.description || "") + '" placeholder="显示在下载页的说明"></label>' +
+            '<span class="file-size">' + fileSize(file.size) + '</span>' +
+            '<div class="file-actions"><button class="file-up" type="button">上移</button><button class="file-down" type="button">下移</button><button class="file-delete" type="button">删除</button></div>' +
           '</div>';
         }).join("") + '</div>' +
       '</article>';
@@ -495,6 +515,7 @@ description: 可视化编辑资料索引与上传公开文件
         file: file
       });
     });
+    sortFiles(section.files);
     renderSections();
     setStatus("已加入 " + files.length + " 个待上传文件。");
   }
@@ -957,6 +978,8 @@ description: 可视化编辑资料索引与上传公开文件
 .section-editor {
   padding: 14px;
   margin-top: 12px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .section-editor-head {
@@ -1008,17 +1031,65 @@ description: 可视化编辑资料索引与上传公开文件
   display: grid;
   gap: 8px;
   margin-top: 12px;
+  min-width: 0;
+}
+
+.file-list-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.35fr) minmax(0, 1.35fr) 72px 172px;
+  gap: 10px;
+  padding: 0 2px;
+  color: #60758a;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .file-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.35fr) minmax(240px, 1.35fr) 72px 54px 54px 54px;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.35fr) minmax(0, 1.35fr) 72px 172px;
   gap: 10px;
   align-items: center;
+  min-width: 0;
+}
+
+.file-row label {
+  min-width: 0;
+}
+
+.file-row label span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.file-row input,
+.file-row .file-size,
+.file-actions {
+  min-width: 0;
 }
 
 .file-row input {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-size {
+  color: #60758a;
+  white-space: nowrap;
+}
+
+.file-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.file-actions button {
   min-width: 0;
+  padding: 0 8px;
 }
 
 .manager-empty {
@@ -1046,6 +1117,23 @@ description: 可视化编辑资料索引与上传公开文件
 
   .file-row {
     grid-template-columns: 1fr;
+  }
+
+  .file-list-head {
+    display: none;
+  }
+
+  .file-row label span {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+  }
+
+  .file-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .section-editor-head {
