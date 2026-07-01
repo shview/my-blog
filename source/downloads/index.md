@@ -240,6 +240,7 @@ description: 课程资料、文件说明与公开下载
     var normalizedQuery = (query || "").trim().toLowerCase();
     var currentRoute = route();
     var currentView = currentRoute.view || "overview";
+    if (["overview", "teachers", "files"].indexOf(currentView) === -1) currentView = "overview";
     var sections = (course.sections || []).map(function (section) {
       var files = section.files.filter(function (file) {
         if (!normalizedQuery) return true;
@@ -270,8 +271,7 @@ description: 课程资料、文件说明与公开下载
     var views = [
       ["overview", "总览"],
       ["teachers", "教师"],
-      ["archive", "归档"],
-      ["files", "资料"]
+      ["files", "整体资料"]
     ];
     return '<nav class="resource-course-nav" aria-label="课程子页面">' + views.map(function (item) {
       var view = item[0];
@@ -284,7 +284,6 @@ description: 课程资料、文件说明与公开下载
       return renderSearchResults(course, sections, normalizedQuery);
     }
     if (view === "teachers") return renderTeachersView(course);
-    if (view === "archive") return renderArchiveView(course);
     if (view === "files") return renderFilesView(course, sections, "");
     return renderOverviewView(course);
   }
@@ -378,45 +377,6 @@ description: 课程资料、文件说明与公开下载
     '</section>';
   }
 
-  function archiveKey(file) {
-    var text = [file.title, file.path, file.description].join(" ");
-    var match = text.match(/(20\d{2})(?:[-—~至](20\d{2}))?/);
-    if (!match) return "未归档年份";
-    return match[2] ? match[1] + "-" + match[2] : match[1];
-  }
-
-  function renderArchiveView(course) {
-    var archive = {};
-    (course.sections || []).forEach(function (section) {
-      (section.files || []).forEach(function (file) {
-        var key = archiveKey(file);
-        archive[key] = archive[key] || [];
-        archive[key].push({ section: section, file: file });
-      });
-    });
-    (course.teachers || []).forEach(function (teacher) {
-      (teacher.collections || []).forEach(function (collection) {
-        (collection.files || []).forEach(function (file) {
-          var key = collection.year || archiveKey(file);
-          archive[key] = archive[key] || [];
-          archive[key].push({
-            section: { title: [teacher.name, collection.title].filter(Boolean).join(" / ") },
-            file: file
-          });
-        });
-      });
-    });
-    var years = Object.keys(archive).sort(function (a, b) { return b.localeCompare(a, "zh-Hans-CN", { numeric: true }); });
-    if (!years.length) return '<div class="resource-empty">暂无可归档资料。</div>';
-    return '<section class="resource-archive">' + years.map(function (year) {
-      return '<details open><summary><strong>' + escapeHtml(year) + '</strong><span>' + archive[year].length + ' 个文件</span></summary>' +
-        '<div class="resource-files">' + archive[year].map(function (item) {
-          return renderFile(item.file, course, item.section.title);
-        }).join("") + '</div>' +
-      '</details>';
-    }).join("") + '</section>';
-  }
-
   function renderFilesView(course, sections, normalizedQuery) {
     return sections.length
       ? sections.map(function (section) { return renderSection(section, course); }).join("")
@@ -453,7 +413,7 @@ description: 课程资料、文件说明与公开下载
     var title = file.title;
     var path = file.path;
     var size = file.size;
-    return '<a class="resource-file" href="' + makeHref(path, course) + '" download>' +
+    return '<a class="resource-file" href="' + makeHref(path, course) + '" data-filename="' + escapeHtml(title) + '" download="' + escapeHtml(title) + '">' +
       '<span class="resource-file-type">' + escapeHtml(fileType(title)) + '</span>' +
       '<span class="resource-file-main"><strong>' + escapeHtml(title) + '</strong><small>' + escapeHtml([context, sizeLabel(size), file.description].filter(Boolean).join(" / ")) + '</small></span>' +
       '<span class="resource-file-action">下载</span>' +
@@ -494,6 +454,13 @@ description: 课程资料、文件说明与公开下载
   }
 
   content.addEventListener("click", function (event) {
+    var fileLink = event.target.closest(".resource-file");
+    if (fileLink) {
+      event.preventDefault();
+      downloadFile(fileLink);
+      return;
+    }
+
     var button = event.target.closest(".resource-section-toggle");
     if (!button) return;
     var target = document.getElementById(button.getAttribute("aria-controls"));
@@ -523,6 +490,39 @@ description: 课程资料、文件说明与公开下载
 
   function makeHref(path, course) {
     return encodeURI(resourceRoot + (course.basePath || "") + path);
+  }
+
+  function downloadFile(link) {
+    var url = link.href;
+    var filename = link.dataset.filename || link.getAttribute("download") || "download";
+    var action = link.querySelector(".resource-file-action");
+    var oldText = action ? action.textContent : "";
+    if (action) action.textContent = "准备中";
+    setStatus("正在准备下载：" + filename);
+
+    fetch(url, { cache: "no-cache" })
+      .then(function (response) {
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        return response.blob();
+      })
+      .then(function (blob) {
+        var objectUrl = URL.createObjectURL(blob);
+        var downloadLink = document.createElement("a");
+        downloadLink.href = objectUrl;
+        downloadLink.download = filename;
+        downloadLink.style.display = "none";
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+        setTimeout(function () { URL.revokeObjectURL(objectUrl); }, 1000);
+        setStatus("");
+      })
+      .catch(function (error) {
+        setStatus("下载准备失败：" + error.message + "。可以右键链接另存为，或稍后重试。", true);
+      })
+      .finally(function () {
+        if (action) action.textContent = oldText || "下载";
+      });
   }
 
   loadCatalog();
