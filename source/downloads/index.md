@@ -123,9 +123,15 @@ description: 课程资料、文件说明与公开下载
   }
 
   function fileCount(course) {
-    return (course.sections || []).reduce(function (sum, section) {
+    var sectionFiles = (course.sections || []).reduce(function (sum, section) {
       return sum + (section.files || []).length;
     }, 0);
+    var teacherFiles = (course.teachers || []).reduce(function (sum, teacher) {
+      return sum + (teacher.collections || []).reduce(function (innerSum, collection) {
+        return innerSum + (collection.files || []).length;
+      }, 0);
+    }, 0);
+    return sectionFiles + teacherFiles;
   }
 
   function formatSize(bytes) {
@@ -163,6 +169,17 @@ description: 课程资料、文件说明与公开下载
     return catalog.find(function (course) { return course.id === id; }) || catalog[0];
   }
 
+  function teacherId(teacher) {
+    return teacher.id || slug(teacher.name || "teacher");
+  }
+
+  function activeTeacher(course) {
+    var detail = route().detail;
+    return (course.teachers || []).find(function (teacher) {
+      return teacherId(teacher) === detail;
+    });
+  }
+
   function searchableText(course) {
     return [
       course.term,
@@ -176,6 +193,13 @@ description: 课程资料、文件说明与公开下载
       course.sections.map(function (section) {
         return section.title + " " + section.note + " " + section.files.map(function (file) {
           return file.title + " " + (file.description || "");
+        }).join(" ");
+      }).join(" "),
+      (course.teachers || []).map(function (teacher) {
+        return teacher.name + " " + (teacher.summary || "") + " " + (teacher.collections || []).map(function (collection) {
+          return collection.year + " " + collection.title + " " + collection.note + " " + (collection.files || []).map(function (file) {
+            return file.title + " " + (file.description || "");
+          }).join(" ");
         }).join(" ");
       }).join(" ")
     ].join(" ").toLowerCase();
@@ -257,12 +281,33 @@ description: 课程资料、文件说明与公开下载
 
   function renderCourseView(course, view, sections, normalizedQuery) {
     if (normalizedQuery) {
-      return renderFilesView(course, sections, normalizedQuery);
+      return renderSearchResults(course, sections, normalizedQuery);
     }
     if (view === "teachers") return renderTeachersView(course);
     if (view === "archive") return renderArchiveView(course);
     if (view === "files") return renderFilesView(course, sections, "");
     return renderOverviewView(course);
+  }
+
+  function renderSearchResults(course, sections, normalizedQuery) {
+    var teacherSections = [];
+    (course.teachers || []).forEach(function (teacher) {
+      (teacher.collections || []).forEach(function (collection) {
+        var files = (collection.files || []).filter(function (file) {
+          return [teacher.name, teacher.summary, collection.year, collection.title, collection.note, file.title, file.description || ""]
+            .join(" ").toLowerCase().indexOf(normalizedQuery) !== -1;
+        });
+        if (files.length) {
+          teacherSections.push({
+            title: [teacher.name, collection.year, collection.title].filter(Boolean).join(" / "),
+            note: collection.note || teacher.summary || "",
+            collapsed: false,
+            files: files
+          });
+        }
+      });
+    });
+    return renderFilesView(course, sections.concat(teacherSections), normalizedQuery);
   }
 
   function renderOverviewView(course) {
@@ -295,16 +340,42 @@ description: 课程资料、文件说明与公开下载
     if (!teachers.length) {
       return '<div class="resource-empty">暂未维护教师子页面。后续可为不同老师添加课程说明、资料差异和年份归档。</div>';
     }
-    return '<section class="resource-teachers">' + teachers.map(function (teacher) {
-      var years = teacher.years || [];
-      return '<article class="resource-teacher">' +
-        '<h3>' + escapeHtml(teacher.name || "未命名教师") + '</h3>' +
-        '<p>' + escapeHtml(teacher.summary || "暂无说明。") + '</p>' +
-        (years.length ? '<div class="resource-teacher-years">' + years.map(function (year) {
-          return '<span>' + escapeHtml(year) + '</span>';
-        }).join("") + '</div>' : '') +
-      '</article>';
+    var teacher = activeTeacher(course);
+    if (teacher) return renderTeacherDetail(course, teacher);
+
+    return '<section class="resource-teachers">' + teachers.map(function (item) {
+      var collections = item.collections || [];
+      var count = collections.reduce(function (sum, collection) { return sum + (collection.files || []).length; }, 0);
+      return '<a class="resource-teacher" href="#/' + encodeURIComponent(course.id) + '/teachers/' + encodeURIComponent(teacherId(item)) + '">' +
+        '<h3>' + escapeHtml(item.name || "未命名教师") + '</h3>' +
+        '<p>' + escapeHtml(item.summary || "暂无说明。") + '</p>' +
+        '<div class="resource-teacher-years">' + (collections.length ? collections.map(function (collection) {
+          return '<span>' + escapeHtml([collection.year, collection.title].filter(Boolean).join(" / ")) + '</span>';
+        }).join("") : '<span>待补充资料集</span>') + '</div>' +
+        '<em>' + count + ' 个文件</em>' +
+      '</a>';
     }).join("") + '</section>';
+  }
+
+  function renderTeacherDetail(course, teacher) {
+    var collections = teacher.collections || [];
+    return '<section class="resource-teacher-detail">' +
+      '<a class="resource-back-link" href="#/' + encodeURIComponent(course.id) + '/teachers">返回教师列表</a>' +
+      '<div class="resource-teacher-intro"><h3>' + escapeHtml(teacher.name || "未命名教师") + '</h3><p>' + escapeHtml(teacher.summary || "暂无说明。") + '</p></div>' +
+      (collections.length ? collections.map(function (collection, index) {
+        var files = collection.files || [];
+        var open = collection.defaultOpen === true || (index === 0 && collection.defaultOpen !== false);
+        return '<section class="resource-section resource-teacher-collection">' +
+          '<button class="resource-section-toggle" type="button" aria-expanded="' + open + '" aria-controls="resource-teacher-' + slug(teacherId(teacher) + '-' + collection.id + '-' + index) + '">' +
+            '<span><strong>' + escapeHtml([collection.year, collection.title].filter(Boolean).join(" / ") || "未命名资料集") + '</strong><small>' + escapeHtml(collection.note || "暂无说明。") + '</small></span>' +
+            '<em>' + files.length + ' 个文件</em>' +
+          '</button>' +
+          '<div class="resource-files" id="resource-teacher-' + slug(teacherId(teacher) + '-' + collection.id + '-' + index) + '"' + (open ? '' : ' hidden') + '>' +
+            files.map(function (file) { return renderFile(file, course, teacher.name); }).join("") +
+          '</div>' +
+        '</section>';
+      }).join("") : '<div class="resource-empty">这个老师还没有维护年度资料集。</div>') +
+    '</section>';
   }
 
   function archiveKey(file) {
@@ -321,6 +392,18 @@ description: 课程资料、文件说明与公开下载
         var key = archiveKey(file);
         archive[key] = archive[key] || [];
         archive[key].push({ section: section, file: file });
+      });
+    });
+    (course.teachers || []).forEach(function (teacher) {
+      (teacher.collections || []).forEach(function (collection) {
+        (collection.files || []).forEach(function (file) {
+          var key = collection.year || archiveKey(file);
+          archive[key] = archive[key] || [];
+          archive[key].push({
+            section: { title: [teacher.name, collection.title].filter(Boolean).join(" / ") },
+            file: file
+          });
+        });
       });
     });
     var years = Object.keys(archive).sort(function (a, b) { return b.localeCompare(a, "zh-Hans-CN", { numeric: true }); });
@@ -849,7 +932,42 @@ description: 课程资料、文件说明与公开下载
 }
 
 .resource-teacher {
+  display: grid;
+  gap: 8px;
   padding: 14px;
+  color: var(--text-color, #333);
+  text-decoration: none;
+}
+
+.resource-teacher:hover {
+  border-color: rgba(63, 132, 119, 0.38);
+  color: var(--text-color, #333);
+  text-decoration: none;
+}
+
+.resource-teacher em {
+  color: #2f6d62;
+  font-size: 13px;
+  font-style: normal;
+}
+
+.resource-back-link {
+  display: inline-flex;
+  margin-bottom: 14px;
+  color: #2f6d62;
+  text-decoration: none;
+}
+
+.resource-back-link:hover {
+  text-decoration: underline;
+}
+
+.resource-teacher-intro {
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px solid rgba(96, 117, 138, 0.16);
+  border-radius: 8px;
+  background: rgba(96, 117, 138, 0.04);
 }
 
 .resource-teacher-years {

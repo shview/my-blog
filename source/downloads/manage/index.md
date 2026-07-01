@@ -79,10 +79,18 @@ description: 可视化编辑资料索引与上传公开文件
 
       <section class="manager-panel">
         <div class="manager-section-head">
-          <h2>分组与文件</h2>
+          <h2>课程分组与共用文件</h2>
           <button id="section-add" type="button">新增分组</button>
         </div>
         <div id="section-list"></div>
+      </section>
+
+      <section class="manager-panel">
+        <div class="manager-section-head">
+          <h2>教师与年度资料</h2>
+          <button id="teacher-add" type="button">新增教师</button>
+        </div>
+        <div id="teacher-list"></div>
       </section>
     </main>
   </div>
@@ -97,6 +105,7 @@ description: 可视化编辑资料索引与上传公开文件
   var courseList = document.getElementById("course-list");
   var courseFilter = document.getElementById("course-filter");
   var sectionList = document.getElementById("section-list");
+  var teacherList = document.getElementById("teacher-list");
   var manifest = null;
   var selectedCourseId = "";
   var pendingUploads = [];
@@ -251,12 +260,39 @@ description: 可视化编辑资料索引与上传公开文件
     return prefix + safePathPart(title);
   }
 
+  function teacherId(teacher) {
+    return teacher.id || slug(teacher.name || "teacher");
+  }
+
+  function suggestedTeacherFilePath(teacher, collection, file) {
+    var title = file.title || baseName(file.path) || "未命名文件";
+    var parts = [teacher.name || "未命名教师", collection.year || "未归档年份", collection.title || "资料"].map(safePathPart);
+    return parts.filter(Boolean).join("/") + "/" + safePathPart(title);
+  }
+
   function fileSortKey(file) {
     return String(file.title || file.path || "").trim();
   }
 
+  function chapterNumber(value) {
+    var text = String(value || "");
+    var arabic = text.match(/第\s*(\d+)\s*章/);
+    if (arabic) return Number(arabic[1]);
+    var chinese = text.match(/第\s*([一二三四五六七八九十]+)\s*章/);
+    if (!chinese) return null;
+    var map = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+    var valueText = chinese[1];
+    if (valueText === "十") return 10;
+    if (valueText.indexOf("十") === 0) return 10 + (map[valueText.slice(1)] || 0);
+    if (valueText.indexOf("十") > 0) return (map[valueText[0]] || 0) * 10 + (map[valueText.slice(-1)] || 0);
+    return map[valueText] || null;
+  }
+
   function sortFiles(files) {
     return (files || []).sort(function (a, b) {
+      var chapterA = chapterNumber(fileSortKey(a));
+      var chapterB = chapterNumber(fileSortKey(b));
+      if (chapterA !== null && chapterB !== null && chapterA !== chapterB) return chapterA - chapterB;
       return fileSortKey(a).localeCompare(fileSortKey(b), "zh-Hans-CN", {
         numeric: true,
         sensitivity: "base"
@@ -268,6 +304,20 @@ description: 可视化编辑资料索引与上传公开文件
     (manifest.courses || []).forEach(function (course) {
       (course.sections || []).forEach(function (section) {
         section.files = sortFiles(section.files || []);
+      });
+      course.teachers = (course.teachers || []).map(function (teacher) {
+        teacher.id = teacher.id || teacherId(teacher);
+        teacher.collections = teacher.collections || [];
+        if (!teacher.collections.length && teacher.years && teacher.years.length) {
+          teacher.collections = teacher.years.map(function (year, index) {
+            return { id: String(year), year: String(year), title: String(year) + " 年资料", note: "", defaultOpen: index === 0, files: [] };
+          });
+          delete teacher.years;
+        }
+        teacher.collections.forEach(function (collection) {
+          collection.files = sortFiles(collection.files || []);
+        });
+        return teacher;
       });
     });
   }
@@ -284,9 +334,15 @@ description: 可视化编辑资料索引与上传公开文件
   }
 
   function courseFileCount(course) {
-    return (course.sections || []).reduce(function (sum, section) {
+    var sectionFiles = (course.sections || []).reduce(function (sum, section) {
       return sum + (section.files || []).length;
     }, 0);
+    var teacherFiles = (course.teachers || []).reduce(function (sum, teacher) {
+      return sum + (teacher.collections || []).reduce(function (innerSum, collection) {
+        return innerSum + (collection.files || []).length;
+      }, 0);
+    }, 0);
+    return sectionFiles + teacherFiles;
   }
 
   function loadManifest() {
@@ -301,13 +357,14 @@ description: 可视化编辑资料索引与上传公开文件
     renderCourses();
     renderCourseEditor();
     renderSections();
+    renderTeachers();
   }
 
   function renderCourses() {
     var query = courseFilter.value.trim().toLowerCase();
     var courses = (manifest.courses || []).filter(function (course) {
       if (!query) return true;
-      return [course.title, course.term, course.group, course.id, course.summary, (course.tags || []).join(" ")]
+      return [course.title, course.term, course.group, course.id, course.summary, (course.tags || []).join(" "), (course.teachers || []).map(function (teacher) { return teacher.name + " " + teacher.summary; }).join(" ")]
         .some(function (value) { return textIncludes(value, query); });
     });
     var terms = {};
@@ -383,7 +440,52 @@ description: 可视化编辑资料索引与上传公开文件
     }).join("");
   }
 
-  function saveCourseFromForm() {
+  function renderFileRows(files) {
+    return '<div class="file-list">' + (files.length ? '<div class="file-list-head"><span></span><span>文件名</span><span>大小</span><span></span></div>' : '') + files.map(function (file, fileIndex) {
+      return '<div class="file-row" data-file="' + fileIndex + '">' +
+        '<span class="drag-handle" draggable="true" title="拖动排序" aria-label="拖动排序">::</span>' +
+        '<label><span>文件名</span><input class="file-title" type="text" value="' + escapeHtml(file.title || "") + '" title="' + escapeHtml(file.title || "") + '" placeholder="文件名"></label>' +
+        '<span class="file-size">' + fileSize(file.size) + '</span>' +
+        '<button class="file-delete" type="button" title="删除" aria-label="删除">×</button>' +
+      '</div>';
+    }).join("") + '</div>';
+  }
+
+  function renderTeachers() {
+    var course = courseById(selectedCourseId);
+    if (!course) {
+      teacherList.innerHTML = '<div class="manager-empty">请先新增或选择课程。</div>';
+      return;
+    }
+    course.teachers = course.teachers || [];
+    teacherList.innerHTML = course.teachers.map(function (teacher, teacherIndex) {
+      var collections = teacher.collections || [];
+      return '<article class="teacher-editor" data-teacher="' + teacherIndex + '">' +
+        '<div class="teacher-editor-head">' +
+          '<input class="teacher-name" type="text" value="' + escapeHtml(teacher.name || "") + '" title="' + escapeHtml(teacher.name || "") + '" placeholder="教师姓名">' +
+          '<button class="collection-add" type="button">新增年份集合</button>' +
+          '<button class="teacher-delete" type="button" title="删除教师" aria-label="删除教师">×</button>' +
+        '</div>' +
+        '<textarea class="teacher-summary" rows="2" title="' + escapeHtml(teacher.summary || "") + '" placeholder="教师介绍">' + escapeHtml(teacher.summary || "") + '</textarea>' +
+        '<div class="collection-list">' + collections.map(function (collection, collectionIndex) {
+          var files = collection.files || [];
+          return '<section class="collection-editor" data-collection="' + collectionIndex + '">' +
+            '<div class="collection-editor-head">' +
+              '<input class="collection-year" type="text" value="' + escapeHtml(collection.year || "") + '" title="' + escapeHtml(collection.year || "") + '" placeholder="年份，如 2026">' +
+              '<input class="collection-title" type="text" value="' + escapeHtml(collection.title || "") + '" title="' + escapeHtml(collection.title || "") + '" placeholder="集合名，如 PPT / 作业">' +
+              '<label class="section-collapse"><input class="collection-default-open" type="checkbox"' + (collection.defaultOpen ? " checked" : "") + '> 默认展开</label>' +
+              '<button class="collection-delete" type="button" title="删除集合" aria-label="删除集合">×</button>' +
+            '</div>' +
+            '<textarea class="collection-note" rows="2" title="' + escapeHtml(collection.note || "") + '" placeholder="集合说明">' + escapeHtml(collection.note || "") + '</textarea>' +
+            '<div class="drop-zone teacher-drop-zone" data-teacher="' + teacherIndex + '" data-collection="' + collectionIndex + '">拖拽文件到这里，或点击选择<input class="teacher-file-picker" type="file" multiple></div>' +
+            renderFileRows(files) +
+          '</section>';
+        }).join("") + '</div>' +
+      '</article>';
+    }).join("") || '<div class="manager-empty">还没有教师。可以先新增一个教师，再按年份添加 PPT、作业等资料集。</div>';
+  }
+
+  function saveCourseFromForm(skipRender) {
     var course = courseById(selectedCourseId);
     if (!course) return;
     var oldId = course.id;
@@ -406,8 +508,10 @@ description: 可视化编辑资料索引与上传公开文件
     pendingUploads.forEach(function (upload) {
       if (upload.courseId === oldId) upload.courseId = course.id;
     });
-    render();
-    setStatus("课程已保存。");
+    if (!skipRender) {
+      render();
+      setStatus("课程已保存。");
+    }
   }
 
   function autoFillCourseFields() {
@@ -472,6 +576,44 @@ description: 可视化编辑资料索引与上传公开文件
     });
   }
 
+  function saveTeachersFromDom() {
+    var course = courseById(selectedCourseId);
+    if (!course) return;
+    course.teachers = course.teachers || [];
+    Array.prototype.forEach.call(teacherList.querySelectorAll(".teacher-editor"), function (teacherNode) {
+      var teacherIndex = Number(teacherNode.dataset.teacher);
+      var teacher = course.teachers[teacherIndex];
+      if (!teacher) return;
+      var oldTeacherId = teacher.id;
+      teacher.name = teacherNode.querySelector(".teacher-name").value.trim();
+      teacher.id = teacher.id || teacherId(teacher);
+      if (!teacher.id || teacher.id === oldTeacherId) teacher.id = teacherId(teacher);
+      teacher.summary = teacherNode.querySelector(".teacher-summary").value.trim();
+      teacher.collections = teacher.collections || [];
+      Array.prototype.forEach.call(teacherNode.querySelectorAll(".collection-editor"), function (collectionNode) {
+        var collectionIndex = Number(collectionNode.dataset.collection);
+        var collection = teacher.collections[collectionIndex];
+        if (!collection) return;
+        collection.year = collectionNode.querySelector(".collection-year").value.trim();
+        collection.title = collectionNode.querySelector(".collection-title").value.trim();
+        collection.note = collectionNode.querySelector(".collection-note").value.trim();
+        collection.defaultOpen = collectionNode.querySelector(".collection-default-open").checked;
+        collection.id = collection.id || slug([collection.year, collection.title].filter(Boolean).join("-"));
+        Array.prototype.forEach.call(collectionNode.querySelectorAll(".file-row"), function (fileNode) {
+          var file = collection.files[Number(fileNode.dataset.file)];
+          if (!file) return;
+          var oldPath = file.path;
+          file.title = fileNode.querySelector(".file-title").value.trim();
+          file.path = suggestedTeacherFilePath(teacher, collection, file);
+          if (!file.description) file.description = stripExtension(file.title) + "。";
+          pendingUploads.forEach(function (upload) {
+            if (upload.courseId === course.id && upload.path === oldPath) upload.path = file.path;
+          });
+        });
+      });
+    });
+  }
+
   function addCourse() {
     if (!manifest) {
       setStatus("还没有资料索引，请先刷新或导入 manifest.json。", true);
@@ -496,12 +638,52 @@ description: 可视化编辑资料索引与上传公开文件
     render();
   }
 
+  function addTeacher() {
+    if (!manifest) {
+      setStatus("还没有资料索引，请先刷新或导入 manifest.json。", true);
+      return;
+    }
+    saveSectionsFromDom();
+    saveTeachersFromDom();
+    saveCourseFromForm(true);
+    var course = courseById(selectedCourseId);
+    if (!course) return;
+    course.teachers = course.teachers || [];
+    course.teachers.push({
+      id: "teacher-" + Date.now(),
+      name: "新教师",
+      summary: "",
+      collections: []
+    });
+    renderTeachers();
+  }
+
+  function addCollection(teacherIndex) {
+    saveSectionsFromDom();
+    saveTeachersFromDom();
+    saveCourseFromForm(true);
+    var course = courseById(selectedCourseId);
+    if (!course || !course.teachers[teacherIndex]) return;
+    course.teachers[teacherIndex].collections = course.teachers[teacherIndex].collections || [];
+    course.teachers[teacherIndex].collections.push({
+      id: String(new Date().getFullYear()) + "-materials",
+      year: String(new Date().getFullYear()),
+      title: "资料",
+      note: "",
+      defaultOpen: true,
+      files: []
+    });
+    renderTeachers();
+  }
+
   function addSection() {
     if (!manifest) {
       setStatus("还没有资料索引，请先刷新或导入 manifest.json。", true);
       return;
     }
-    saveCourseFromForm();
+    saveSectionsFromDom();
+    saveTeachersFromDom();
+    saveCourseFromForm(true);
     var course = courseById(selectedCourseId);
     if (!course) return;
     course.sections = course.sections || [];
@@ -517,8 +699,9 @@ description: 可视化编辑资料索引与上传公开文件
 
 
   function addFiles(sectionIndex, files) {
-    saveCourseFromForm();
     saveSectionsFromDom();
+    saveTeachersFromDom();
+    saveCourseFromForm(true);
     var course = courseById(selectedCourseId);
     var section = course.sections[sectionIndex];
     var prefix = section.title ? section.title.replace(/[\\/:*?"<>|]/g, "-") + "/" : "";
@@ -542,13 +725,36 @@ description: 可视化编辑资料索引与上传公开文件
     setStatus("已加入 " + files.length + " 个待上传文件。");
   }
 
+  function addTeacherFiles(teacherIndex, collectionIndex, files) {
+    saveSectionsFromDom();
+    saveTeachersFromDom();
+    saveCourseFromForm(true);
+    var course = courseById(selectedCourseId);
+    var teacher = course.teachers[teacherIndex];
+    var collection = teacher.collections[collectionIndex];
+    Array.prototype.forEach.call(files, function (file) {
+      var draft = { title: file.name, path: "", size: file.size, description: stripExtension(file.name) + "。" };
+      draft.path = suggestedTeacherFilePath(teacher, collection, draft);
+      collection.files.push(draft);
+      pendingUploads.push({
+        courseId: course.id,
+        path: draft.path,
+        file: file
+      });
+    });
+    sortFiles(collection.files);
+    renderTeachers();
+    setStatus("已加入 " + files.length + " 个教师资料待上传文件。");
+  }
+
   function exportManifest() {
     if (!manifest) {
       setStatus("还没有资料索引，请先刷新或导入 manifest.json。", true);
       return;
     }
-    saveCourseFromForm();
     saveSectionsFromDom();
+    saveTeachersFromDom();
+    saveCourseFromForm(true);
     manifest.updated = today();
     var blob = new Blob([JSON.stringify(manifest, null, 2) + "\n"], { type: "application/json" });
     var link = document.createElement("a");
@@ -625,8 +831,9 @@ description: 可视化编辑资料索引与上传公开文件
       setStatus("还没有资料索引，请先刷新或导入 manifest.json。", true);
       return;
     }
-    saveCourseFromForm();
     saveSectionsFromDom();
+    saveTeachersFromDom();
+    saveCourseFromForm(true);
     manifest.updated = today();
 
     var owner = github.owner.value.trim();
@@ -666,8 +873,9 @@ description: 可视化编辑资料索引与上传公开文件
   courseList.addEventListener("click", function (event) {
     var button = event.target.closest(".course-item");
     if (!button) return;
-    saveCourseFromForm();
     saveSectionsFromDom();
+    saveTeachersFromDom();
+    saveCourseFromForm(true);
     selectedCourseId = button.dataset.id;
     render();
   });
@@ -712,6 +920,7 @@ description: 可视化编辑资料索引与上传公开文件
     }
     saveSectionsFromDom();
     draggingFile = {
+      kind: "section",
       sectionIndex: Number(sectionNode.dataset.section),
       fileIndex: Number(row.dataset.file)
     };
@@ -727,7 +936,7 @@ description: 可视化编辑资料索引与上传公开文件
   });
 
   sectionList.addEventListener("dragover", function (event) {
-    if (event.target.closest(".file-row") && draggingFile) {
+    if (event.target.closest(".file-row") && draggingFile && draggingFile.kind === "section") {
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
       return;
@@ -737,7 +946,7 @@ description: 可视化编辑资料索引与上传公开文件
 
   sectionList.addEventListener("drop", function (event) {
     var row = event.target.closest(".file-row");
-    if (row && draggingFile) {
+    if (row && draggingFile && draggingFile.kind === "section") {
       event.preventDefault();
       var course = courseById(selectedCourseId);
       var sectionNode = row.closest(".section-editor");
@@ -764,6 +973,113 @@ description: 可视化编辑资料索引与上传公开文件
     event.target.value = "";
   });
 
+  teacherList.addEventListener("input", function (event) {
+    if (event.target.matches(".teacher-name, .teacher-summary, .collection-year, .collection-title, .collection-note, .file-title")) {
+      event.target.title = event.target.value;
+    }
+    saveTeachersFromDom();
+  });
+
+  teacherList.addEventListener("click", function (event) {
+    var course = courseById(selectedCourseId);
+    var teacherNode = event.target.closest(".teacher-editor");
+    if (!course || !teacherNode) return;
+    var teacherIndex = Number(teacherNode.dataset.teacher);
+    var collectionNode = event.target.closest(".collection-editor");
+    var fileNode = event.target.closest(".file-row");
+
+    if (event.target.closest(".collection-add")) {
+      addCollection(teacherIndex);
+      return;
+    }
+
+    var deleteTeacher = event.target.closest(".teacher-delete");
+    var deleteCollection = event.target.closest(".collection-delete");
+    var deleteFile = event.target.closest(".file-delete");
+    if (!deleteTeacher && !deleteCollection && !deleteFile) return;
+
+    saveTeachersFromDom();
+    if (deleteTeacher) course.teachers.splice(teacherIndex, 1);
+    if (deleteCollection && collectionNode) course.teachers[teacherIndex].collections.splice(Number(collectionNode.dataset.collection), 1);
+    if (deleteFile && collectionNode && fileNode) {
+      var collection = course.teachers[teacherIndex].collections[Number(collectionNode.dataset.collection)];
+      collection.files.splice(Number(fileNode.dataset.file), 1);
+    }
+    renderTeachers();
+  });
+
+  teacherList.addEventListener("dragstart", function (event) {
+    var handle = event.target.closest(".drag-handle");
+    var row = event.target.closest(".file-row");
+    var teacherNode = event.target.closest(".teacher-editor");
+    var collectionNode = event.target.closest(".collection-editor");
+    if (!handle || !row || !teacherNode || !collectionNode) {
+      event.preventDefault();
+      return;
+    }
+    saveTeachersFromDom();
+    draggingFile = {
+      kind: "teacher",
+      teacherIndex: Number(teacherNode.dataset.teacher),
+      collectionIndex: Number(collectionNode.dataset.collection),
+      fileIndex: Number(row.dataset.file)
+    };
+    row.classList.add("is-dragging");
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", "teacher-file-row");
+  });
+
+  teacherList.addEventListener("dragend", function (event) {
+    var row = event.target.closest(".file-row");
+    if (row) row.classList.remove("is-dragging");
+    draggingFile = null;
+  });
+
+  teacherList.addEventListener("dragover", function (event) {
+    if (event.target.closest(".file-row") && draggingFile && draggingFile.kind === "teacher") {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      return;
+    }
+    if (event.target.closest(".teacher-drop-zone")) event.preventDefault();
+  });
+
+  teacherList.addEventListener("drop", function (event) {
+    var row = event.target.closest(".file-row");
+    if (row && draggingFile && draggingFile.kind === "teacher") {
+      event.preventDefault();
+      var course = courseById(selectedCourseId);
+      var teacherNode = row.closest(".teacher-editor");
+      var collectionNode = row.closest(".collection-editor");
+      var targetTeacherIndex = Number(teacherNode.dataset.teacher);
+      var targetCollectionIndex = Number(collectionNode.dataset.collection);
+      var targetFileIndex = Number(row.dataset.file);
+      if (course && targetTeacherIndex === draggingFile.teacherIndex && targetCollectionIndex === draggingFile.collectionIndex && targetFileIndex !== draggingFile.fileIndex) {
+        saveTeachersFromDom();
+        moveItem(course.teachers[targetTeacherIndex].collections[targetCollectionIndex].files, draggingFile.fileIndex, targetFileIndex);
+        renderTeachers();
+      }
+      draggingFile = null;
+      return;
+    }
+    var zone = event.target.closest(".teacher-drop-zone");
+    if (!zone) return;
+    event.preventDefault();
+    addTeacherFiles(Number(zone.dataset.teacher), Number(zone.dataset.collection), event.dataTransfer.files);
+  });
+
+  teacherList.addEventListener("change", function (event) {
+    if (event.target.classList.contains("collection-default-open")) {
+      saveTeachersFromDom();
+      return;
+    }
+    if (!event.target.classList.contains("teacher-file-picker")) return;
+    var teacherNode = event.target.closest(".teacher-editor");
+    var collectionNode = event.target.closest(".collection-editor");
+    addTeacherFiles(Number(teacherNode.dataset.teacher), Number(collectionNode.dataset.collection), event.target.files);
+    event.target.value = "";
+  });
+
   document.getElementById("manager-load").addEventListener("click", loadManifest);
   document.getElementById("manager-import").addEventListener("change", function (event) {
     var file = event.target.files[0];
@@ -787,6 +1103,7 @@ description: 可视化编辑资料索引与上传公开文件
   document.getElementById("manager-commit").addEventListener("click", commitToGithub);
   document.getElementById("course-add").addEventListener("click", addCourse);
   document.getElementById("section-add").addEventListener("click", addSection);
+  document.getElementById("teacher-add").addEventListener("click", addTeacher);
   document.getElementById("course-autofill").addEventListener("click", autoFillCourseFields);
   document.getElementById("course-save").addEventListener("click", saveCourseFromForm);
   document.getElementById("course-delete").addEventListener("click", function () {
@@ -962,7 +1279,9 @@ description: 可视化编辑资料索引与上传公开文件
 
 .manager-sidebar,
 .manager-panel,
-.section-editor {
+.section-editor,
+.teacher-editor,
+.collection-editor {
   border: 1px solid rgba(96, 117, 138, 0.18);
   border-radius: 8px;
   background: var(--board-bg-color, #fff);
@@ -1080,21 +1399,52 @@ description: 可视化编辑资料索引与上传公开文件
   grid-column: span 2;
 }
 
-.section-editor {
+.section-editor,
+.teacher-editor {
   padding: 14px;
   margin-top: 12px;
   min-width: 0;
   overflow: hidden;
 }
 
-.section-editor-head {
+.section-editor-head,
+.teacher-editor-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 112px 40px;
   align-items: center;
+  gap: 10px;
 }
 
-.section-title {
+.section-title,
+.teacher-name,
+.collection-year,
+.collection-title {
   min-width: 0;
+}
+
+.teacher-summary {
+  margin: 10px 0;
+}
+
+.collection-list {
+  display: grid;
+  gap: 12px;
+}
+
+.collection-editor {
+  padding: 12px;
+  background: rgba(96, 117, 138, 0.035);
+}
+
+.collection-editor-head {
+  display: grid;
+  grid-template-columns: minmax(92px, 0.45fr) minmax(0, 1fr) 112px 40px;
+  align-items: center;
+  gap: 10px;
+}
+
+.collection-note {
+  margin: 10px 0;
 }
 
 .section-collapse {
@@ -1215,7 +1565,9 @@ description: 可视化编辑资料索引与上传公开文件
   line-height: 1;
 }
 
-.section-delete {
+.section-delete,
+.teacher-delete,
+.collection-delete {
   width: 40px;
   min-width: 40px;
   padding: 0;
@@ -1269,6 +1621,16 @@ description: 可视化编辑资料索引与上传公开文件
 
   .section-editor-head {
     grid-template-columns: minmax(0, 1fr) 112px 40px;
+  }
+
+  .teacher-editor-head,
+  .collection-editor-head {
+    grid-template-columns: minmax(0, 1fr) 40px;
+  }
+
+  .teacher-editor-head .collection-add,
+  .collection-editor-head .section-collapse {
+    grid-column: 1 / -1;
   }
 }
 </style>
