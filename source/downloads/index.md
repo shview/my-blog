@@ -48,6 +48,12 @@ description: 课程资料、文件说明与公开下载
   var status = document.getElementById("resource-status");
   var catalog = [];
   var resourceRoot = "";
+  var repository = "shview/NKU-study-resources";
+  var fileFilters = {
+    type: "",
+    year: "",
+    query: ""
+  };
 
   var tree = document.getElementById("resource-tree");
   var content = document.getElementById("resource-content");
@@ -107,6 +113,7 @@ description: 课程资料、文件说明与公开下载
     loadFromUrls(catalogUrls(), 0)
       .then(function (manifest) {
         catalog = manifest.courses || [];
+        repository = manifest.repository || repository;
         resourceRoot = ["localhost", "127.0.0.1"].indexOf(location.hostname) !== -1
           ? "http://localhost:4020/resources/"
           : (manifest.resourceRoot || "");
@@ -143,6 +150,12 @@ description: 课程资料、文件说明与公开下载
   function fileType(name) {
     var match = name.match(/\.([^.]+)$/);
     return match ? match[1].toUpperCase() : "FILE";
+  }
+
+  function fileYear(file) {
+    var text = [file.title, file.path, file.description].join(" ");
+    var match = text.match(/(20\d{2})/);
+    return match ? match[1] : "";
   }
 
   function slug(value) {
@@ -358,29 +371,104 @@ description: 课程资料、文件说明与公开下载
 
   function renderTeacherDetail(course, teacher) {
     var collections = teacher.collections || [];
+    var collectionSections = collections.map(function (collection, index) {
+      return {
+        id: collection.id,
+        year: collection.year,
+        title: collection.title,
+        note: collection.note,
+        defaultOpen: collection.defaultOpen,
+        index: index,
+        files: collection.files || []
+      };
+    });
+    var filteredCollections = applyFileFilters(collectionSections);
     return '<section class="resource-teacher-detail">' +
       '<a class="resource-back-link" href="#/' + encodeURIComponent(course.id) + '/teachers">返回教师列表</a>' +
       '<div class="resource-teacher-intro"><h3>' + escapeHtml(teacher.name || "未命名教师") + '</h3><p>' + escapeHtml(teacher.summary || "暂无说明。") + '</p></div>' +
-      (collections.length ? collections.map(function (collection, index) {
+      renderFileFilters(collectionSections) +
+      (filteredCollections.length ? filteredCollections.map(function (collection) {
         var files = collection.files || [];
-        var open = collection.defaultOpen === true || (index === 0 && collection.defaultOpen !== false);
+        var open = collection.defaultOpen === true || (collection.index === 0 && collection.defaultOpen !== false);
         return '<section class="resource-section resource-teacher-collection">' +
-          '<button class="resource-section-toggle" type="button" aria-expanded="' + open + '" aria-controls="resource-teacher-' + slug(teacherId(teacher) + '-' + collection.id + '-' + index) + '">' +
+          '<button class="resource-section-toggle" type="button" aria-expanded="' + open + '" aria-controls="resource-teacher-' + slug(teacherId(teacher) + '-' + collection.id + '-' + collection.index) + '">' +
             '<span><strong>' + escapeHtml([collection.year, collection.title].filter(Boolean).join(" / ") || "未命名资料集") + '</strong><small>' + escapeHtml(collection.note || "暂无说明。") + '</small></span>' +
             '<em>' + files.length + ' 个文件</em>' +
           '</button>' +
-          '<div class="resource-files" id="resource-teacher-' + slug(teacherId(teacher) + '-' + collection.id + '-' + index) + '"' + (open ? '' : ' hidden') + '>' +
+          '<div class="resource-files" id="resource-teacher-' + slug(teacherId(teacher) + '-' + collection.id + '-' + collection.index) + '"' + (open ? '' : ' hidden') + '>' +
             files.map(function (file) { return renderFile(file, course, teacher.name); }).join("") +
           '</div>' +
         '</section>';
-      }).join("") : '<div class="resource-empty">这个老师还没有维护年度资料集。</div>') +
+      }).join("") : '<div class="resource-empty">' + (collections.length ? "没有匹配当前筛选条件的教师资料。" : "这个老师还没有维护年度资料集。") + '</div>') +
     '</section>';
   }
 
   function renderFilesView(course, sections, normalizedQuery) {
+    var filteredSections = applyFileFilters(sections);
     return sections.length
-      ? sections.map(function (section) { return renderSection(section, course); }).join("")
+      ? renderFileFilters(sections) + (filteredSections.length
+        ? filteredSections.map(function (section) { return renderSection(section, course); }).join("")
+        : '<div class="resource-empty">没有匹配当前筛选条件的资料。</div>')
       : '<div class="resource-empty">' + (normalizedQuery ? "没有找到匹配的资料。" : "暂无资料文件。") + '</div>';
+  }
+
+  function allFiles(sections) {
+    return (sections || []).reduce(function (files, section) {
+      return files.concat(section.files || []);
+    }, []);
+  }
+
+  function uniqueSorted(values) {
+    return values.filter(Boolean).filter(function (value, index, list) {
+      return list.indexOf(value) === index;
+    }).sort(function (a, b) {
+      return a.localeCompare(b, "zh-Hans-CN", { numeric: true, sensitivity: "base" });
+    });
+  }
+
+  function renderFileFilters(sections) {
+    var files = allFiles(sections);
+    if (!files.length) return "";
+    var types = uniqueSorted(files.map(function (file) { return fileType(file.title || file.path); }));
+    var years = uniqueSorted(files.map(fileYear)).reverse();
+    return '<div class="resource-file-filters" role="search" aria-label="文件筛选">' +
+      '<label>类型<select class="resource-filter-type">' +
+        '<option value="">全部类型</option>' +
+        types.map(function (type) {
+          return '<option value="' + escapeHtml(type) + '"' + (fileFilters.type === type ? " selected" : "") + '>' + escapeHtml(type) + '</option>';
+        }).join("") +
+      '</select></label>' +
+      '<label>年份<select class="resource-filter-year">' +
+        '<option value="">全部年份</option>' +
+        years.map(function (year) {
+          return '<option value="' + escapeHtml(year) + '"' + (fileFilters.year === year ? " selected" : "") + '>' + escapeHtml(year) + '</option>';
+        }).join("") +
+      '</select></label>' +
+      '<label>关键词<input class="resource-filter-query" type="search" value="' + escapeHtml(fileFilters.query) + '" placeholder="筛选当前文件列表"></label>' +
+      '<button class="resource-filter-clear" type="button">清除</button>' +
+    '</div>';
+  }
+
+  function fileMatchesFilters(file) {
+    var type = fileType(file.title || file.path);
+    var year = fileYear(file);
+    var query = fileFilters.query.trim().toLowerCase();
+    if (fileFilters.type && type !== fileFilters.type) return false;
+    if (fileFilters.year && year !== fileFilters.year) return false;
+    if (query) {
+      return [file.title, file.path, file.description].join(" ").toLowerCase().indexOf(query) !== -1;
+    }
+    return true;
+  }
+
+  function applyFileFilters(sections) {
+    return (sections || []).map(function (section) {
+      return Object.assign({}, section, {
+        files: (section.files || []).filter(fileMatchesFilters)
+      });
+    }).filter(function (section) {
+      return (section.files || []).length || (!fileFilters.type && !fileFilters.year && !fileFilters.query && section.note);
+    });
   }
 
   function renderMeta(course) {
@@ -413,7 +501,7 @@ description: 课程资料、文件说明与公开下载
     var title = file.title;
     var path = file.path;
     var size = file.size;
-    return '<a class="resource-file" href="' + makeHref(path, course) + '" data-filename="' + escapeHtml(title) + '" download="' + escapeHtml(title) + '">' +
+    return '<a class="resource-file" href="' + makeHref(path, course) + '" data-resource-path="' + escapeHtml(makeResourcePath(path, course)) + '" data-filename="' + escapeHtml(title) + '" download="' + escapeHtml(title) + '">' +
       '<span class="resource-file-type">' + escapeHtml(fileType(title)) + '</span>' +
       '<span class="resource-file-main"><strong>' + escapeHtml(title) + '</strong><small>' + escapeHtml([context, sizeLabel(size), file.description].filter(Boolean).join(" / ")) + '</small></span>' +
       '<span class="resource-file-action">下载</span>' +
@@ -454,6 +542,14 @@ description: 课程资料、文件说明与公开下载
   }
 
   content.addEventListener("click", function (event) {
+    var clearFilters = event.target.closest(".resource-filter-clear");
+    if (clearFilters) {
+      event.preventDefault();
+      fileFilters = { type: "", year: "", query: "" };
+      refresh();
+      return;
+    }
+
     var fileLink = event.target.closest(".resource-file");
     if (fileLink) {
       event.preventDefault();
@@ -468,6 +564,30 @@ description: 课程资料、文件说明与公开下载
     var expanded = button.getAttribute("aria-expanded") === "true";
     button.setAttribute("aria-expanded", String(!expanded));
     target.hidden = expanded;
+  });
+
+  content.addEventListener("input", function (event) {
+    if (!event.target.matches(".resource-filter-query")) return;
+    var start = event.target.selectionStart;
+    fileFilters.query = event.target.value;
+    refresh();
+    var input = content.querySelector(".resource-filter-query");
+    if (input) {
+      input.focus();
+      input.setSelectionRange(start, start);
+    }
+  });
+
+  content.addEventListener("change", function (event) {
+    if (event.target.matches(".resource-filter-type")) {
+      fileFilters.type = event.target.value;
+      refresh();
+      return;
+    }
+    if (event.target.matches(".resource-filter-year")) {
+      fileFilters.year = event.target.value;
+      refresh();
+    }
   });
 
   tree.addEventListener("click", function (event) {
@@ -489,23 +609,43 @@ description: 课程资料、文件说明与公开下载
   window.addEventListener("hashchange", refresh);
 
   function makeHref(path, course) {
-    return encodeURI(resourceRoot + (course.basePath || "") + path);
+    return encodeURI(resourceRoot + makeResourcePath(path, course));
+  }
+
+  function makeResourcePath(path, course) {
+    return (course.basePath || "") + path;
+  }
+
+  function encodePath(path) {
+    return String(path || "").split("/").map(function (part) {
+      return encodeURIComponent(part);
+    }).join("/");
+  }
+
+  function downloadUrls(link) {
+    var urls = [link.href];
+    var resourcePath = link.dataset.resourcePath || "";
+    if (resourcePath) {
+      urls.push("https://fastly.jsdelivr.net/gh/" + repository + "@main/resources/" + encodePath(resourcePath));
+      urls.push("https://cdn.jsdelivr.net/gh/" + repository + "@main/resources/" + encodePath(resourcePath));
+      urls.push("https://raw.githubusercontent.com/" + repository + "/main/resources/" + encodePath(resourcePath));
+    }
+    return urls.filter(function (url, index, list) {
+      return url && list.indexOf(url) === index;
+    });
   }
 
   function downloadFile(link) {
-    var url = link.href;
+    var urls = downloadUrls(link);
     var filename = link.dataset.filename || link.getAttribute("download") || "download";
     var action = link.querySelector(".resource-file-action");
     var oldText = action ? action.textContent : "";
     if (action) action.textContent = "准备中";
     setStatus("正在准备下载：" + filename);
 
-    fetch(url, { cache: "no-cache" })
+    fetchDownload(urls, 0)
       .then(function (response) {
-        if (!response.ok) throw new Error("HTTP " + response.status);
-        return response.blob();
-      })
-      .then(function (blob) {
+        var blob = response.blob;
         var objectUrl = URL.createObjectURL(blob);
         var downloadLink = document.createElement("a");
         downloadLink.href = objectUrl;
@@ -523,6 +663,20 @@ description: 课程资料、文件说明与公开下载
       .finally(function () {
         if (action) action.textContent = oldText || "下载";
       });
+  }
+
+  function fetchDownload(urls, index, lastError) {
+    if (index >= urls.length) {
+      throw lastError || new Error("没有可用下载源");
+    }
+    return fetch(urls[index], { cache: "no-cache" }).then(function (response) {
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      return response.blob().then(function (blob) {
+        return { blob: blob, url: urls[index] };
+      });
+    }).catch(function (error) {
+      return fetchDownload(urls, index + 1, error);
+    });
   }
 
   loadCatalog();
@@ -1008,6 +1162,53 @@ description: 课程资料、文件说明与公开下载
   font-size: 13px;
 }
 
+.resource-file-filters {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.8fr) minmax(110px, 0.8fr) minmax(180px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin: 0 0 18px;
+  padding: 12px;
+  border: 1px solid rgba(96, 117, 138, 0.16);
+  border-radius: 8px;
+  background: rgba(96, 117, 138, 0.04);
+}
+
+.resource-file-filters label {
+  display: grid;
+  gap: 6px;
+  color: #6c7f92;
+  font-size: 12px;
+}
+
+.resource-file-filters select,
+.resource-file-filters input {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid rgba(96, 117, 138, 0.24);
+  border-radius: 8px;
+  color: var(--text-color, #333);
+  background: var(--board-bg-color, #fff);
+  outline: none;
+}
+
+.resource-file-filters select:focus,
+.resource-file-filters input:focus {
+  border-color: rgba(63, 132, 119, 0.62);
+  box-shadow: 0 0 0 3px rgba(63, 132, 119, 0.12);
+}
+
+.resource-filter-clear {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid rgba(63, 132, 119, 0.34);
+  border-radius: 8px;
+  color: #2f6d62;
+  background: rgba(63, 132, 119, 0.08);
+  cursor: pointer;
+}
+
 .resource-section {
   margin-top: 24px;
 }
@@ -1166,7 +1367,8 @@ description: 课程资料、文件说明与公开下载
   }
 
   .resource-overview-grid,
-  .resource-section-cards {
+  .resource-section-cards,
+  .resource-file-filters {
     grid-template-columns: 1fr;
   }
 

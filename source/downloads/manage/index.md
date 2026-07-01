@@ -110,6 +110,7 @@ description: 可视化编辑资料索引与上传公开文件
   var selectedCourseId = "";
   var pendingUploads = [];
   var draggingFile = null;
+  var githubFileLimit = 100 * 1024 * 1024;
 
   var fields = {
     id: document.getElementById("course-id"),
@@ -333,6 +334,17 @@ description: 可视化编辑资料索引与上传公开文件
     return bytes + " B";
   }
 
+  function uploadableFiles(files) {
+    var list = Array.prototype.slice.call(files || []);
+    var tooLarge = list.filter(function (file) { return file.size > githubFileLimit; });
+    if (tooLarge.length) {
+      setStatus("GitHub 单文件限制为 100 MB，已跳过：" + tooLarge.map(function (file) {
+        return file.name + "（" + fileSize(file.size) + "）";
+      }).join("、"), true);
+    }
+    return list.filter(function (file) { return file.size <= githubFileLimit; });
+  }
+
   function courseFileCount(course) {
     var sectionFiles = (course.sections || []).reduce(function (sum, section) {
       return sum + (section.files || []).length;
@@ -427,7 +439,7 @@ description: 可视化编辑资料索引与上传公开文件
           '<button class="section-delete" type="button" title="删除分组" aria-label="删除分组">×</button>' +
         '</div>' +
         '<textarea class="section-note" rows="2" title="' + escapeHtml(section.note || "") + '" placeholder="分组说明">' + escapeHtml(section.note || "") + '</textarea>' +
-        '<div class="drop-zone" data-section="' + sectionIndex + '">拖拽文件到这里，或点击选择<input class="file-picker" type="file" multiple></div>' +
+        '<div class="drop-zone" data-section="' + sectionIndex + '">拖拽文件到这里，或点击选择<span>单个文件需小于 100 MB</span><input class="file-picker" type="file" multiple></div>' +
         '<div class="file-list">' + (files.length ? '<div class="file-list-head"><span></span><span>文件名</span><span>大小</span><span></span></div>' : '') + files.map(function (file, fileIndex) {
           return '<div class="file-row" data-file="' + fileIndex + '">' +
             '<span class="drag-handle" draggable="true" title="拖动排序" aria-label="拖动排序">::</span>' +
@@ -477,7 +489,7 @@ description: 可视化编辑资料索引与上传公开文件
               '<button class="collection-delete" type="button" title="删除集合" aria-label="删除集合">×</button>' +
             '</div>' +
             '<textarea class="collection-note" rows="2" title="' + escapeHtml(collection.note || "") + '" placeholder="集合说明">' + escapeHtml(collection.note || "") + '</textarea>' +
-            '<div class="drop-zone teacher-drop-zone" data-teacher="' + teacherIndex + '" data-collection="' + collectionIndex + '">拖拽文件到这里，或点击选择<input class="teacher-file-picker" type="file" multiple></div>' +
+            '<div class="drop-zone teacher-drop-zone" data-teacher="' + teacherIndex + '" data-collection="' + collectionIndex + '">拖拽文件到这里，或点击选择<span>单个文件需小于 100 MB</span><input class="teacher-file-picker" type="file" multiple></div>' +
             renderFileRows(files) +
           '</section>';
         }).join("") + '</div>' +
@@ -699,6 +711,8 @@ description: 可视化编辑资料索引与上传公开文件
 
 
   function addFiles(sectionIndex, files) {
+    files = uploadableFiles(files);
+    if (!files.length) return;
     saveSectionsFromDom();
     saveTeachersFromDom();
     saveCourseFromForm(true);
@@ -726,6 +740,8 @@ description: 可视化编辑资料索引与上传公开文件
   }
 
   function addTeacherFiles(teacherIndex, collectionIndex, files) {
+    files = uploadableFiles(files);
+    if (!files.length) return;
     saveSectionsFromDom();
     saveTeachersFromDom();
     saveCourseFromForm(true);
@@ -1473,6 +1489,13 @@ description: 可视化编辑资料索引与上传公开文件
   background: rgba(63, 132, 119, 0.06);
   text-align: center;
   cursor: pointer;
+}
+
+.drop-zone span {
+  display: block;
+  margin-top: 6px;
+  color: #7b8b99;
+  font-size: 12px;
 }
 
 .drop-zone input {
