@@ -123,8 +123,8 @@ description: 课程资料、文件说明与公开下载
   }
 
   function fileCount(course) {
-    return course.sections.reduce(function (sum, section) {
-      return sum + section.files.length;
+    return (course.sections || []).reduce(function (sum, section) {
+      return sum + (section.files || []).length;
     }, 0);
   }
 
@@ -143,8 +143,23 @@ description: 课程资料、文件说明与公开下载
     return encodeURIComponent(String(value || "")).replace(/%/g, "");
   }
 
+  function escapeHtml(value) {
+    return String(value || "").replace(/[&<>"']/g, function (char) {
+      return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char];
+    });
+  }
+
+  function route() {
+    var parts = decodeURIComponent((location.hash || "").replace(/^#\/?/, "")).split("/").filter(Boolean);
+    return {
+      courseId: parts[0] || "",
+      view: parts[1] || "overview",
+      detail: parts[2] || ""
+    };
+  }
+
   function activeCourse() {
-    var id = decodeURIComponent((location.hash || "").replace(/^#\/?/, ""));
+    var id = route().courseId;
     return catalog.find(function (course) { return course.id === id; }) || catalog[0];
   }
 
@@ -178,16 +193,16 @@ description: 课程资料、文件说明与公开下载
       var groups = terms[term];
       var termId = "resource-tree-term-" + slug(term);
       return '<div class="resource-tree-term">' +
-        '<button class="resource-tree-toggle" type="button" aria-expanded="true" aria-controls="' + termId + '">' + term + '</button>' +
+        '<button class="resource-tree-toggle" type="button" aria-expanded="true" aria-controls="' + termId + '">' + escapeHtml(term) + '</button>' +
         '<div id="' + termId + '" class="resource-tree-body">' +
         Object.keys(groups).map(function (group) {
           var groupId = "resource-tree-group-" + slug(term) + "-" + slug(group);
           return '<div class="resource-tree-group">' +
-            '<button class="resource-tree-toggle resource-tree-toggle-sub" type="button" aria-expanded="true" aria-controls="' + groupId + '">' + group + '</button>' +
+            '<button class="resource-tree-toggle resource-tree-toggle-sub" type="button" aria-expanded="true" aria-controls="' + groupId + '">' + escapeHtml(group) + '</button>' +
             '<div id="' + groupId + '" class="resource-tree-body">' +
             groups[group].map(function (course) {
-              return '<a class="resource-course-link" data-id="' + course.id + '" href="#/' + course.id + '">' +
-                '<span>' + course.title + '</span><small>' + fileCount(course) + ' 个文件</small></a>';
+              return '<a class="resource-course-link" data-id="' + escapeHtml(course.id) + '" href="#/' + encodeURIComponent(course.id) + '/overview">' +
+                '<span>' + escapeHtml(course.title) + '</span><small>' + fileCount(course) + ' 个文件</small></a>';
             }).join("") +
             '</div>' +
           '</div>';
@@ -199,7 +214,9 @@ description: 课程资料、文件说明与公开下载
 
   function renderCourse(course, query) {
     var normalizedQuery = (query || "").trim().toLowerCase();
-    var sections = course.sections.map(function (section) {
+    var currentRoute = route();
+    var currentView = currentRoute.view || "overview";
+    var sections = (course.sections || []).map(function (section) {
       var files = section.files.filter(function (file) {
         if (!normalizedQuery) return true;
         return [course.term, course.group, course.title, section.title, section.note, file.title, file.description || "", course.tags.join(" ")]
@@ -215,13 +232,112 @@ description: 课程资料、文件说明与公开下载
     content.innerHTML =
       '<article class="resource-course">' +
         '<div class="resource-course-head">' +
-          '<div><h2>' + course.title + '</h2><p>' + course.summary + '</p></div>' +
+          '<div><h2>' + escapeHtml(course.title) + '</h2><p>' + escapeHtml(course.summary) + '</p></div>' +
           '<div class="resource-count">' + fileCount(course) + '<span>文件</span></div>' +
         '</div>' +
         renderMeta(course) +
-        '<div class="resource-tags">' + course.tags.map(function (tag) { return '<span>#' + tag + '</span>'; }).join("") + '</div>' +
-        (sections.length ? sections.map(function (section) { return renderSection(section, course); }).join("") : '<div class="resource-empty">没有找到匹配的资料。</div>') +
+        '<div class="resource-tags">' + (course.tags || []).map(function (tag) { return '<span>#' + escapeHtml(tag) + '</span>'; }).join("") + '</div>' +
+        renderCourseNav(course, currentView) +
+        renderCourseView(course, currentView, sections, normalizedQuery) +
       '</article>';
+  }
+
+  function renderCourseNav(course, currentView) {
+    var views = [
+      ["overview", "总览"],
+      ["teachers", "教师"],
+      ["archive", "归档"],
+      ["files", "资料"]
+    ];
+    return '<nav class="resource-course-nav" aria-label="课程子页面">' + views.map(function (item) {
+      var view = item[0];
+      return '<a class="' + (currentView === view ? "is-active" : "") + '" href="#/' + encodeURIComponent(course.id) + '/' + view + '">' + item[1] + '</a>';
+    }).join("") + '</nav>';
+  }
+
+  function renderCourseView(course, view, sections, normalizedQuery) {
+    if (normalizedQuery) {
+      return renderFilesView(course, sections, normalizedQuery);
+    }
+    if (view === "teachers") return renderTeachersView(course);
+    if (view === "archive") return renderArchiveView(course);
+    if (view === "files") return renderFilesView(course, sections, "");
+    return renderOverviewView(course);
+  }
+
+  function renderOverviewView(course) {
+    var sections = course.sections || [];
+    var highlights = [
+      ["资料分组", sections.length + " 个"],
+      ["文件总数", fileCount(course) + " 个"],
+      ["最近更新", course.updated || "未填写"]
+    ];
+    return '<section class="resource-overview">' +
+      '<div class="resource-overview-grid">' + highlights.map(function (item) {
+        return '<div><dt>' + item[0] + '</dt><dd>' + item[1] + '</dd></div>';
+      }).join("") + '</div>' +
+      '<div class="resource-section-map">' +
+        '<h3>课程总览</h3>' +
+        '<p>' + escapeHtml(course.summary || "暂无课程总览。") + '</p>' +
+        '<div class="resource-section-cards">' + sections.map(function (section) {
+          return '<a href="#/' + encodeURIComponent(course.id) + '/files" class="resource-section-card">' +
+            '<strong>' + escapeHtml(section.title || "未命名分组") + '</strong>' +
+            '<span>' + escapeHtml(section.note || "暂无说明") + '</span>' +
+            '<em>' + ((section.files || []).length) + ' 个文件</em>' +
+          '</a>';
+        }).join("") + '</div>' +
+      '</div>' +
+    '</section>';
+  }
+
+  function renderTeachersView(course) {
+    var teachers = course.teachers || [];
+    if (!teachers.length) {
+      return '<div class="resource-empty">暂未维护教师子页面。后续可为不同老师添加课程说明、资料差异和年份归档。</div>';
+    }
+    return '<section class="resource-teachers">' + teachers.map(function (teacher) {
+      var years = teacher.years || [];
+      return '<article class="resource-teacher">' +
+        '<h3>' + escapeHtml(teacher.name || "未命名教师") + '</h3>' +
+        '<p>' + escapeHtml(teacher.summary || "暂无说明。") + '</p>' +
+        (years.length ? '<div class="resource-teacher-years">' + years.map(function (year) {
+          return '<span>' + escapeHtml(year) + '</span>';
+        }).join("") + '</div>' : '') +
+      '</article>';
+    }).join("") + '</section>';
+  }
+
+  function archiveKey(file) {
+    var text = [file.title, file.path, file.description].join(" ");
+    var match = text.match(/(20\d{2})(?:[-—~至](20\d{2}))?/);
+    if (!match) return "未归档年份";
+    return match[2] ? match[1] + "-" + match[2] : match[1];
+  }
+
+  function renderArchiveView(course) {
+    var archive = {};
+    (course.sections || []).forEach(function (section) {
+      (section.files || []).forEach(function (file) {
+        var key = archiveKey(file);
+        archive[key] = archive[key] || [];
+        archive[key].push({ section: section, file: file });
+      });
+    });
+    var years = Object.keys(archive).sort(function (a, b) { return b.localeCompare(a, "zh-Hans-CN", { numeric: true }); });
+    if (!years.length) return '<div class="resource-empty">暂无可归档资料。</div>';
+    return '<section class="resource-archive">' + years.map(function (year) {
+      return '<details open><summary><strong>' + escapeHtml(year) + '</strong><span>' + archive[year].length + ' 个文件</span></summary>' +
+        '<div class="resource-files">' + archive[year].map(function (item) {
+          return renderFile(item.file, course, item.section.title);
+        }).join("") + '</div>' +
+      '</details>';
+    }).join("") + '</section>';
+  }
+
+  function renderFilesView(course, sections, normalizedQuery) {
+    return sections.length
+      ? sections.map(function (section) { return renderSection(section, course); }).join("")
+      : '<div class="resource-empty">' + (normalizedQuery ? "没有找到匹配的资料。" : "暂无资料文件。") + '</div>';
   }
 
   function renderMeta(course) {
@@ -232,7 +348,7 @@ description: 课程资料、文件说明与公开下载
       ["适用年级", (course.grades || []).join("、") || "未填写"]
     ];
     return '<dl class="resource-meta">' + meta.map(function (item) {
-      return '<div><dt>' + item[0] + '</dt><dd>' + item[1] + '</dd></div>';
+      return '<div><dt>' + item[0] + '</dt><dd>' + escapeHtml(item[1]) + '</dd></div>';
     }).join("") + '</dl>';
   }
 
@@ -241,7 +357,7 @@ description: 课程资料、文件说明与公开下载
     var sectionId = "resource-section-" + course.id + "-" + slug(section.title);
     return '<section class="resource-section">' +
       '<button class="resource-section-toggle" type="button" aria-expanded="' + (!shouldCollapse) + '" aria-controls="' + sectionId + '">' +
-        '<span><strong>' + section.title + '</strong><small>' + section.note + '</small></span>' +
+        '<span><strong>' + escapeHtml(section.title) + '</strong><small>' + escapeHtml(section.note) + '</small></span>' +
         '<em>' + section.files.length + ' 个文件</em>' +
       '</button>' +
       '<div class="resource-files" id="' + sectionId + '"' + (shouldCollapse ? ' hidden' : '') + '>' +
@@ -250,13 +366,13 @@ description: 课程资料、文件说明与公开下载
     '</section>';
   }
 
-  function renderFile(file, course) {
+  function renderFile(file, course, context) {
     var title = file.title;
     var path = file.path;
     var size = file.size;
     return '<a class="resource-file" href="' + makeHref(path, course) + '" download>' +
-      '<span class="resource-file-type">' + fileType(title) + '</span>' +
-      '<span class="resource-file-main"><strong>' + title + '</strong><small>' + sizeLabel(size) + (file.description ? " / " + file.description : "") + '</small></span>' +
+      '<span class="resource-file-type">' + escapeHtml(fileType(title)) + '</span>' +
+      '<span class="resource-file-main"><strong>' + escapeHtml(title) + '</strong><small>' + escapeHtml([context, sizeLabel(size), file.description].filter(Boolean).join(" / ")) + '</small></span>' +
       '<span class="resource-file-action">下载</span>' +
     '</a>';
   }
@@ -614,6 +730,166 @@ description: 课程资料、文件说明与公开下载
   font-size: 13px;
 }
 
+.resource-course-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 18px 0 22px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(96, 117, 138, 0.16);
+}
+
+.resource-course-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid rgba(96, 117, 138, 0.18);
+  border-radius: 8px;
+  color: #60758a;
+  text-decoration: none;
+}
+
+.resource-course-nav a:hover,
+.resource-course-nav a.is-active {
+  border-color: rgba(63, 132, 119, 0.4);
+  color: #2f6d62;
+  text-decoration: none;
+  background: rgba(63, 132, 119, 0.08);
+}
+
+.resource-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.resource-overview-grid div,
+.resource-teacher,
+.resource-archive details {
+  border: 1px solid rgba(96, 117, 138, 0.16);
+  border-radius: 8px;
+  background: rgba(96, 117, 138, 0.04);
+}
+
+.resource-overview-grid div {
+  padding: 12px 14px;
+}
+
+.resource-overview-grid dt,
+.resource-overview-grid dd {
+  margin: 0;
+}
+
+.resource-overview-grid dt {
+  color: #6c7f92;
+  font-size: 12px;
+}
+
+.resource-overview-grid dd {
+  margin-top: 4px;
+  color: var(--text-color, #333);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.resource-section-map h3,
+.resource-teacher h3 {
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+
+.resource-section-map p,
+.resource-teacher p {
+  margin: 0;
+  color: #60758a;
+  line-height: 1.8;
+}
+
+.resource-section-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.resource-section-card {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid rgba(96, 117, 138, 0.16);
+  border-radius: 8px;
+  color: var(--text-color, #333);
+  background: var(--board-bg-color, #fff);
+  text-decoration: none;
+}
+
+.resource-section-card:hover {
+  border-color: rgba(63, 132, 119, 0.38);
+  color: var(--text-color, #333);
+  text-decoration: none;
+}
+
+.resource-section-card span {
+  color: #60758a;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.resource-section-card em {
+  color: #2f6d62;
+  font-size: 13px;
+  font-style: normal;
+}
+
+.resource-teachers {
+  display: grid;
+  gap: 12px;
+}
+
+.resource-teacher {
+  padding: 14px;
+}
+
+.resource-teacher-years {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.resource-teacher-years span {
+  padding: 4px 8px;
+  border-radius: 8px;
+  color: #2f6d62;
+  background: rgba(63, 132, 119, 0.08);
+  font-size: 12px;
+}
+
+.resource-archive {
+  display: grid;
+  gap: 12px;
+}
+
+.resource-archive details {
+  padding: 12px 14px;
+}
+
+.resource-archive summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+
+.resource-archive summary span {
+  color: #2f6d62;
+  font-size: 13px;
+}
+
 .resource-section {
   margin-top: 24px;
 }
@@ -768,6 +1044,11 @@ description: 课程资料、文件说明与公开下载
   }
 
   .resource-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .resource-overview-grid,
+  .resource-section-cards {
     grid-template-columns: 1fr;
   }
 
